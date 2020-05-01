@@ -3,6 +3,7 @@ package req
 import (
 	"context"
 	"encoding/json"
+	"io/ioutil"
 	"log"
 	"time"
 
@@ -24,7 +25,7 @@ const lockTreeDelayed = "req_lock_tree_delayed"
 type Config struct {
 	Addr     string
 	Password string
-	Logger Logger
+	EnableLogger bool
 }
 
 func Connect(ctx context.Context, cfg *Config) (*Q, error) {
@@ -43,10 +44,10 @@ func Connect(ctx context.Context, cfg *Config) (*Q, error) {
 		client: client,
 		locker:redislock.New(client),
 	}
-	if cfg.Logger == nil {
-		q.logger = &defaultLogger{}
-	} else {
-		q.logger = cfg.Logger
+
+	q.logger = &defaultLogger{}
+	if !cfg.EnableLogger {
+		log.SetOutput(ioutil.Discard)
 	}
 
 	go q.traverseDelayed(ctx)
