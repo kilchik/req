@@ -23,8 +23,8 @@ const treeDelayed = "req_tree_delayed"
 const lockTreeDelayed = "req_lock_tree_delayed"
 
 type Config struct {
-	Addr     string
-	Password string
+	Addr         string
+	Password     string
 	EnableLogger bool
 }
 
@@ -42,7 +42,7 @@ func Connect(ctx context.Context, cfg *Config) (*Q, error) {
 
 	q := &Q{
 		client: client,
-		locker:redislock.New(client),
+		locker: redislock.New(client),
 	}
 
 	q.logger = &defaultLogger{}
@@ -53,6 +53,14 @@ func Connect(ctx context.Context, cfg *Config) (*Q, error) {
 	go q.traverseDelayed(ctx)
 
 	return q, nil
+}
+
+func MustConnect(ctx context.Context, cfg *Config) *Q {
+	q, err := Connect(ctx, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return q
 }
 
 type Q struct {
@@ -71,7 +79,7 @@ func (q *Q) traverseDelayed(ctx context.Context) {
 		default:
 		}
 
-		q.logger.Debug(ctx,"traverse delayed: trying to obtain lock")
+		q.logger.Debug(ctx, "traverse delayed: trying to obtain lock")
 		lock, err := q.locker.Obtain(lockTreeDelayed, 1*time.Minute, nil)
 		if err != nil {
 			if err == redislock.ErrNotObtained {
@@ -81,7 +89,7 @@ func (q *Q) traverseDelayed(ctx context.Context) {
 			time.Sleep(retryTimeout())
 			continue
 		}
-		q.logger.Debug(ctx,"traverse delayed: obtained lock")
+		q.logger.Debug(ctx, "traverse delayed: obtained lock")
 
 		res, err := q.client.ZRangeWithScores(treeDelayed, 0, 0).Result()
 		if err != nil {
@@ -94,7 +102,7 @@ func (q *Q) traverseDelayed(ctx context.Context) {
 		if len(res) == 0 {
 			q.logger.Debug(ctx, "traverse delayed: no delayed tasks found")
 			lock.Release()
-			time.Sleep(1*time.Second)
+			time.Sleep(1 * time.Second)
 			retryTimeout = timeoutExp()
 			continue
 		}
@@ -122,7 +130,7 @@ func (q *Q) traverseDelayed(ctx context.Context) {
 		q.logger.Debugf(ctx, "traverse delayed: delayed task %q is not ready yet", res[0].Member.(string))
 		lock.Release()
 		retryTimeout = timeoutExp()
-		time.Sleep(1*time.Second)
+		time.Sleep(1 * time.Second)
 	}
 }
 
@@ -137,9 +145,9 @@ func (q *Q) Put(ctx context.Context, obj interface{}, delay time.Duration) (task
 	taskId = uuid.New().String()
 
 	task := &Task{
-		Id: taskId,
+		Id:    taskId,
 		Delay: delay,
-		Body:payload,
+		Body:  payload,
 	}
 
 	taskStr, err := json.Marshal(&task)
@@ -187,7 +195,13 @@ func timeoutExp() func() time.Duration {
 func (q *Q) Take(ctx context.Context, obj interface{}) (id string, err error) {
 	retryTimeout := timeoutExp()
 	for {
-		taskId, err := q.client.BRPopLPush(listReady, listTaken, 10*time.Second).Result()
+		select {
+		case <-ctx.Done():
+			return "", context.Canceled
+		default:
+		}
+
+		taskId, err := q.client.BRPopLPush(listReady, listTaken, 1*time.Second).Result()
 		if err != nil {
 			// If timeout
 			if err == redis.Nil {

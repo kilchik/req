@@ -16,7 +16,7 @@ type Logger interface {
 	Debugf(ctx context.Context, format string, args ...interface{})
 }
 
-type defaultLogger struct {}
+type defaultLogger struct{}
 
 func (l *defaultLogger) Error(ctx context.Context, args ...interface{}) {
 	args = append([]interface{}{"[E] "}, args...)

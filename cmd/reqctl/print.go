@@ -3,10 +3,10 @@ package main
 import "fmt"
 
 const (
-	colorRed          = "\u001b[31m"
-	colorGreen        = "\u001b[32m"
-	colorYellow       = "\u001b[33m"
-	colorReset        = "\u001b[0m"
+	colorRed    = "\u001b[31m"
+	colorGreen  = "\u001b[32m"
+	colorYellow = "\u001b[33m"
+	colorReset  = "\u001b[0m"
 )
 
 func printColorized(color string, format string, args ...interface{}) {
@@ -16,14 +16,14 @@ func printColorized(color string, format string, args ...interface{}) {
 	fmt.Println()
 }
 
-func printError(format string, args... interface{}) {
+func printError(format string, args ...interface{}) {
 	printColorized(colorRed, format, args...)
 }
 
-func printSuccess(format string, args... interface{}) {
+func printSuccess(format string, args ...interface{}) {
 	printColorized(colorGreen, format, args...)
 }
 
-func printPrompt()  {
+func printPrompt() {
 	fmt.Printf("> ")
 }

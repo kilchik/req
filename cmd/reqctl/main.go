@@ -15,7 +15,7 @@ import (
 	"github.com/kilchik/req/pkg/req"
 )
 
-func main()  {
+func main() {
 	cfg := &req.Config{
 		Addr:     "localhost:6379",
 		Password: "",
