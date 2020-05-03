@@ -17,10 +17,7 @@ type ReqOpsTestSuite struct {
 }
 
 func (suite *ReqOpsTestSuite) SetupTest() {
-	suite.q = MustConnect(context.Background(), &Config{
-		Addr:     "localhost:6379",
-		Password: "",
-	})
+	suite.q = MustConnect(context.Background(), "localhost:6379", "", DisableLogger)
 	suite.redis = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "",
@@ -108,7 +105,7 @@ func (suite *ReqOpsTestSuite) TestTake() {
 	suite.Equal(context.Canceled, err)
 }
 
-func (suite *ReqOpsTestSuite) TestAck()  {
+func (suite *ReqOpsTestSuite) TestAck() {
 	taskId, err := suite.q.Put(context.Background(), "abc", 0)
 	suite.Require().Nil(err)
 

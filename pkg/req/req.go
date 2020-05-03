@@ -3,7 +3,6 @@ package req
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
 	"log"
 	"time"
 
@@ -22,51 +21,16 @@ const treeDelayed = "req_tree_delayed"
 
 const lockTreeDelayed = "req_lock_tree_delayed"
 
-type Config struct {
-	Addr         string
-	Password     string
-	EnableLogger bool
-}
-
-func Connect(ctx context.Context, cfg *Config) (*Q, error) {
-	client := redis.NewClient(&redis.Options{
-		Addr:     cfg.Addr,
-		Password: cfg.Password,
-		DB:       0,
-	})
-
-	status := client.Ping()
-	if status.Err() != nil {
-		return nil, errors.Wrap(status.Err(), "ping redis")
-	}
-
-	q := &Q{
-		client: client,
-		locker: redislock.New(client),
-	}
-
-	q.logger = &defaultLogger{}
-	if !cfg.EnableLogger {
-		log.SetOutput(ioutil.Discard)
-	}
-
-	go q.traverseDelayed(ctx)
-
-	return q, nil
-}
-
-func MustConnect(ctx context.Context, cfg *Config) *Q {
-	q, err := Connect(ctx, cfg)
-	if err != nil {
-		panic(err)
-	}
-	return q
-}
+const lockTakenValidation = "req_lock_taken_validation"
+const lastValidationTimestamp = "req_last_validation"
 
 type Q struct {
 	client *redis.Client
 	locker *redislock.Client
 	logger Logger
+
+	takeTimeout           time.Duration
+	takenValidationPeriod time.Duration
 }
 
 func (q *Q) traverseDelayed(ctx context.Context) {
@@ -201,6 +165,7 @@ func (q *Q) Take(ctx context.Context, obj interface{}) (id string, err error) {
 		default:
 		}
 
+		// Transfer task id from ready list to taken list
 		taskId, err := q.client.BRPopLPush(listReady, listTaken, 1*time.Second).Result()
 		if err != nil {
 			// If timeout
@@ -213,6 +178,8 @@ func (q *Q) Take(ctx context.Context, obj interface{}) (id string, err error) {
 			continue
 		}
 		q.logger.Debugf(ctx, "successfully got task id %q from ready list", taskId)
+
+		// Retrieve task body from storage
 		taskStr, err := q.client.Get(taskId).Result()
 		q.logger.Debugf(ctx, "successfully got task itself %q from kv storage", taskStr)
 		task := &Task{}
@@ -221,12 +188,17 @@ func (q *Q) Take(ctx context.Context, obj interface{}) (id string, err error) {
 			return "", errors.Wrap(err, "decode task")
 		}
 		q.logger.Debugf(ctx, "successfully decoded task to %v", task)
-
 		if task.Id != taskId {
 			// TODO: handle
 			return "", errors.New("smth bad happened")
 		}
 
+		// Set time when task was taken
+		task.TakenAt = time.Now()
+		taskNewStr, _ := json.Marshal(task)
+		q.client.Set(taskId, taskNewStr, 0)
+
+		// Extract payload
 		if err := json.Unmarshal(task.Body, &obj); err != nil {
 			return "", errors.Wrap(err, "decode task body")
 		}

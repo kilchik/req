@@ -16,13 +16,8 @@ import (
 )
 
 func main() {
-	cfg := &req.Config{
-		Addr:     "localhost:6379",
-		Password: "",
-	}
-
 	ctx := context.Background()
-	q, err := req.Connect(ctx, cfg)
+	q, err := req.Connect(ctx, "localhost:6379", "", req.DisableLogger)
 	if err != nil {
 		log.Fatalf("req: connect: %v", err)
 	}

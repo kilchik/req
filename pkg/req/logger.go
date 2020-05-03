@@ -16,44 +16,54 @@ type Logger interface {
 	Debugf(ctx context.Context, format string, args ...interface{})
 }
 
-type defaultLogger struct{}
+type defaultLogger struct {
+	disabled bool
+}
 
 func (l *defaultLogger) Error(ctx context.Context, args ...interface{}) {
-	args = append([]interface{}{"[E] "}, args...)
-	log.Print(args...)
+	l.printArgs(ctx, "[E]", args...)
 }
 
 func (l *defaultLogger) Errorf(ctx context.Context, format string, args ...interface{}) {
-	format = "[E] " + format
-	log.Printf(format, args...)
+	l.printFormatAndArgs(ctx, "[E]", format, args...)
 }
 
 func (l *defaultLogger) Info(ctx context.Context, args ...interface{}) {
-	args = append([]interface{}{"[I] "}, args...)
-	log.Print(args...)
+	l.printArgs(ctx, "[I]", args...)
 }
 
 func (l *defaultLogger) Infof(ctx context.Context, format string, args ...interface{}) {
-	format = "[I] " + format
-	log.Printf(format, args...)
+	l.printFormatAndArgs(ctx, "[I]", format, args...)
 }
 
 func (l *defaultLogger) Warn(ctx context.Context, args ...interface{}) {
-	args = append([]interface{}{"[W] "}, args...)
-	log.Print(args...)
+	l.printArgs(ctx, "[W]", args...)
 }
 
 func (l *defaultLogger) Warnf(ctx context.Context, format string, args ...interface{}) {
-	format = "[W] " + format
-	log.Printf(format, args...)
+	l.printFormatAndArgs(ctx, "[W]", format, args...)
 }
 
 func (l *defaultLogger) Debug(ctx context.Context, args ...interface{}) {
-	args = append([]interface{}{"[D] "}, args...)
-	log.Print(args...)
+	l.printArgs(ctx, "[D]", args...)
 }
 
 func (l *defaultLogger) Debugf(ctx context.Context, format string, args ...interface{}) {
-	format = "[D] " + format
+	l.printFormatAndArgs(ctx, "[D]", format, args...)
+}
+
+func (l *defaultLogger) printArgs(ctx context.Context, prefix string, args ...interface{}) {
+	if l.disabled {
+		return
+	}
+	args = append([]interface{}{prefix + " "}, args...)
+	log.Print(args...)
+}
+
+func (l *defaultLogger) printFormatAndArgs(ctx context.Context, prefix, format string, args ...interface{}) {
+	if l.disabled {
+		return
+	}
+	format = prefix + " " + format
 	log.Printf(format, args...)
 }
