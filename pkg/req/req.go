@@ -3,6 +3,7 @@ package req
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strconv"
 	"time"
@@ -258,4 +259,19 @@ func (q *Q) Stat(ctx context.Context) (*Stat, error) {
 		return nil, errors.Wrap(err, "stat: parse done string")
 	}
 	return res, nil
+}
+
+// Deletes task if it is present in taken list
+func (q *Q) Delete(ctx context.Context, taskId string) error {
+	deleted, err := q.client.LRem(listTaken, 1, taskId).Result()
+	if err != nil {
+		return errors.Wrapf(err, "delete: LREM %q from taken list: %v", taskId, err)
+	}
+	if deleted != 1 {
+		return errors.New(fmt.Sprintf("delete: no task with id %q found", taskId))
+	}
+	if err := q.client.Del(taskId).Err(); err != nil {
+		return errors.Wrapf(err, "delete: DEL %q", taskId)
+	}
+	return nil
 }

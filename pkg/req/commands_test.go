@@ -153,6 +153,19 @@ func (suite *ReqOpsTestSuite) TestStat() {
 	suite.EqualValues(1, stat.Done)
 }
 
+func (suite *ReqOpsTestSuite) TestDelete()  {
+	_, err := suite.q.Put(context.Background(), "abc", 0)
+	suite.Require().Nil(err)
+	var dst string
+	taskId, err := suite.q.Take(context.Background(), &dst)
+	suite.Require().Nil(err)
+
+	err = suite.q.Delete(context.Background(), taskId)
+	suite.Require().Nil(err)
+	err = suite.q.Delete(context.Background(), taskId)
+	suite.Require().NotNil(err)
+}
+
 func TestReqOpsTestSuite(t *testing.T) {
 	suite.Run(t, new(ReqOpsTestSuite))
 }
