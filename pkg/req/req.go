@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/bsm/redislock"
@@ -23,6 +24,8 @@ const lockTreeDelayed = "req_lock_tree_delayed"
 
 const lockTakenValidation = "req_lock_taken_validation"
 const lastValidationTimestamp = "req_last_validation"
+
+const counterDone = "req_count_done"
 
 type Q struct {
 	client *redis.Client
@@ -214,10 +217,45 @@ func (q *Q) Ack(ctx context.Context, id string) error {
 		return errors.Wrap(err, "ack: LREM")
 	}
 
+	if err := q.client.Incr(counterDone).Err(); err != nil {
+		q.logger.Errorf(ctx, "ack: INCR done counter: %v", err)
+	}
+
 	if err := q.client.Del(id).Err(); err != nil {
 		// TODO retry error
 		return errors.Wrap(err, "ack: DEL")
 	}
 
 	return nil
+}
+
+type Stat struct {
+	Ready, Taken, Delayed, Done int64
+}
+
+func (q *Q) Stat(ctx context.Context) (*Stat, error) {
+	res := &Stat{}
+	var err error
+	res.Ready, err = q.client.LLen(listReady).Result()
+	if err != nil {
+		return nil, errors.Wrap(err, "stat: LLEN ready")
+	}
+	res.Taken, err = q.client.LLen(listTaken).Result()
+	if err != nil {
+		return nil, errors.Wrap(err, "stat: LLEN taken")
+	}
+	res.Delayed, err = q.client.ZCount(treeDelayed, "-inf", "+inf").Result()
+	if err != nil {
+		return nil, errors.Wrap(err, "stat: ZCOUNT delayed")
+	}
+	var doneStr string
+	doneStr, err = q.client.Get(counterDone).Result()
+	if err != nil {
+		return nil, errors.Wrap(err, "stat: GET done")
+	}
+	res.Done, err = strconv.ParseInt(doneStr, 10, 64)
+	if err != nil {
+		return nil, errors.Wrap(err, "stat: parse done string")
+	}
+	return res, nil
 }

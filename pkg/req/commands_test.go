@@ -127,6 +127,32 @@ func (suite *ReqOpsTestSuite) TestAck() {
 	suite.Empty(resArr)
 }
 
+func (suite *ReqOpsTestSuite) TestStat() {
+	_, err := suite.q.Put(context.Background(), "abc", 5*time.Second)
+	suite.Require().Nil(err)
+	_, err = suite.q.Put(context.Background(), "def", 0)
+	suite.Require().Nil(err)
+	_, err = suite.q.Put(context.Background(), "ghi", 0)
+	suite.Require().Nil(err)
+	_, err = suite.q.Put(context.Background(), "jkl", 0)
+	suite.Require().Nil(err)
+	var dst string
+	_, err = suite.q.Take(context.Background(), &dst)
+	suite.Require().Nil(err)
+	var taskId string
+	taskId, err = suite.q.Take(context.Background(), &dst)
+	suite.Require().Nil(err)
+	err = suite.q.Ack(context.Background(), taskId)
+	suite.Require().Nil(err)
+
+	stat, err := suite.q.Stat(context.Background())
+	suite.Require().Nil(err)
+	suite.EqualValues(1, stat.Ready)
+	suite.EqualValues(1, stat.Taken)
+	suite.EqualValues(1, stat.Delayed)
+	suite.EqualValues(1, stat.Done)
+}
+
 func TestReqOpsTestSuite(t *testing.T) {
 	suite.Run(t, new(ReqOpsTestSuite))
 }
