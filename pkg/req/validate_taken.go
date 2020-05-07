@@ -27,7 +27,7 @@ func (q *Q) validateTaken(ctx context.Context, period time.Duration) {
 			// Transfer task id from taken list back to ready in case of timeout
 			// TODO: wrap with retry func
 			var err error
-			lock, err = q.locker.Obtain(lockTakenValidation, period, nil)
+			lock, err = q.locker.Obtain(lockTakenValidation(q.id), period, nil)
 			if err != nil {
 				if err == redislock.ErrNotObtained {
 					// If another pod is already validating taken
@@ -39,7 +39,7 @@ func (q *Q) validateTaken(ctx context.Context, period time.Duration) {
 			}
 
 			// Check last validation timestamp
-			tsStr, err := q.client.Get(lastValidationTimestamp).Result()
+			tsStr, err := q.client.Get(keyLastValidationTs(q.id)).Result()
 			if err == nil {
 				ts, err := strconv.ParseInt(tsStr, 10, 64)
 				if err != nil {
@@ -53,7 +53,7 @@ func (q *Q) validateTaken(ctx context.Context, period time.Duration) {
 			}
 
 			// Traverse all taken and compare if they are taken for too long
-			size, err := q.client.LLen(listTaken).Result()
+			size, err := q.client.LLen(keyListTaken(q.id)).Result()
 			if err != nil {
 				q.logger.Errorf(ctx, "validate taken: LLEN taken list: %v", err)
 				continue
@@ -66,7 +66,7 @@ func (q *Q) validateTaken(ctx context.Context, period time.Duration) {
 				// TODO: alert
 				q.logger.Errorf(ctx, "validate taken: taken list is too long: %d items", size)
 			}
-			res, err := q.client.LRange(listTaken, 0, 1024).Result()
+			res, err := q.client.LRange(keyListTaken(q.id), 0, 1024).Result()
 			if err != nil {
 				q.logger.Errorf(ctx, "validate taken: LRANGE: %v", err)
 				continue
@@ -85,19 +85,19 @@ func (q *Q) validateTaken(ctx context.Context, period time.Duration) {
 				timeDefault := time.Time{}
 				if t.TakenAt != timeDefault && t.TakenAt.Before(time.Now().Add(-q.takeTimeout)) {
 					q.logger.Errorf(ctx, "validate taken: task %q was taken at %v; moving it back to 'ready' list...", taskId, t.TakenAt)
-					if err := q.client.LPush(listReady, taskId).Err(); err != nil {
+					if err := q.client.LPush(keyListReady(q.id), taskId).Err(); err != nil {
 						q.logger.Errorf(ctx, "validate taken: put task %q back to ready list: %v", err)
 						// TODO: handle error
 						continue
 					}
-					if err := q.client.LRem(listTaken, 1, taskId).Err(); err != nil {
+					if err := q.client.LRem(keyListTaken(q.id), 1, taskId).Err(); err != nil {
 						// TODO: retry and handle
 						q.logger.Errorf(ctx, "validate taken: LREM task %q from taken list: %v", taskId, err)
 						continue
 					}
 				}
 			}
-			q.client.Set(lastValidationTimestamp, fmt.Sprintf("%d", time.Now().Unix()), 0)
+			q.client.Set(keyLastValidationTs(q.id), fmt.Sprintf("%d", time.Now().Unix()), 0)
 			lock.Release()
 		}
 	}

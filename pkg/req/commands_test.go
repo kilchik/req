@@ -12,12 +12,14 @@ import (
 
 type ReqOpsTestSuite struct {
 	suite.Suite
-	q     *Q
-	redis *redis.Client
+	fabriq *Fabriq
+	q      *Q
+	redis  *redis.Client
 }
 
 func (suite *ReqOpsTestSuite) SetupTest() {
-	suite.q = MustConnect(context.Background(), "localhost:6379", "", DisableLogger)
+	suite.fabriq = MustConnect(context.Background(), DisableLogger)
+	suite.q = suite.fabriq.MustCreate(context.Background())
 	suite.redis = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "",
@@ -40,14 +42,14 @@ func (suite *ReqOpsTestSuite) TestPutWithZeroDelay() {
 	suite.EqualValues(0, t.Delay)
 	suite.Equal([]byte("\"abc\""), t.Body) // "abc" since json serialized
 
-	res, err := suite.redis.LRange("req_list_ready", 0, 1).Result()
+	res, err := suite.redis.LRange("req_list_ready"+suite.q.GetId(), 0, 1).Result()
 	suite.Require().Nil(err)
 	suite.Require().Len(res, 1)
 	suite.Equal(taskId, res[0])
 
 	taskId, err = suite.q.Put(context.Background(), "abc", 0)
 	suite.Require().Nil(err)
-	res, err = suite.redis.LRange("req_list_ready", 0, 2).Result()
+	res, err = suite.redis.LRange("req_list_ready"+suite.q.GetId(), 0, 2).Result()
 	suite.Require().Nil(err)
 	suite.Require().Len(res, 2)
 	suite.Equal(taskId, res[0])
@@ -61,11 +63,11 @@ func (suite *ReqOpsTestSuite) TestPutWithNonZeroDelay() {
 	suite.Require().Nil(err)
 	suite.Greater(len(taskStr), 3)
 
-	res, err := suite.redis.LRange("req_list_ready", 0, 0).Result()
+	res, err := suite.redis.LRange("req_list_ready"+suite.q.GetId(), 0, 0).Result()
 	suite.Require().Nil(err)
 	suite.Empty(res)
 
-	res, err = suite.redis.ZRange("req_tree_delayed", 0, 1).Result()
+	res, err = suite.redis.ZRange("req_tree_delayed"+suite.q.GetId(), 0, 1).Result()
 	suite.Require().Nil(err)
 	suite.Require().Len(res, 1)
 	suite.Equal(taskId, res[0])
@@ -73,12 +75,12 @@ func (suite *ReqOpsTestSuite) TestPutWithNonZeroDelay() {
 	// In 2 seconds the task must transfer from 'delayed' tree to 'ready' list
 	time.Sleep(2*time.Second + 100*time.Millisecond)
 
-	res, err = suite.redis.LRange("req_list_ready", 0, 1).Result()
+	res, err = suite.redis.LRange("req_list_ready"+suite.q.GetId(), 0, 1).Result()
 	suite.Require().Nil(err)
 	suite.Require().Len(res, 1)
 	suite.Equal(taskId, res[0])
 
-	res, err = suite.redis.ZRange("req_tree_delayed", 0, 0).Result()
+	res, err = suite.redis.ZRange("req_tree_delayed"+suite.q.GetId(), 0, 0).Result()
 	suite.Require().Nil(err)
 	suite.Empty(res)
 }
@@ -91,7 +93,7 @@ func (suite *ReqOpsTestSuite) TestTake() {
 		Body:  payload,
 	})
 	suite.Require().Nil(suite.redis.Set("task_uuid", t, 0).Err())
-	suite.Require().Nil(suite.redis.LPush("req_list_ready", "task_uuid").Err())
+	suite.Require().Nil(suite.redis.LPush("req_list_ready"+suite.q.GetId(), "task_uuid").Err())
 
 	var dst string
 	id, err := suite.q.Take(context.Background(), &dst)
@@ -112,7 +114,7 @@ func (suite *ReqOpsTestSuite) TestAck() {
 	var dst string
 	taskId, err = suite.q.Take(context.Background(), &dst)
 	suite.Require().Nil(err)
-	resArr, err := suite.redis.LRange("req_list_taken", 0, 1).Result()
+	resArr, err := suite.redis.LRange("req_list_taken"+suite.q.GetId(), 0, 1).Result()
 	suite.Require().Nil(err)
 	suite.Len(resArr, 1)
 
@@ -122,7 +124,7 @@ func (suite *ReqOpsTestSuite) TestAck() {
 	suite.Equal(redis.Nil, err)
 	suite.Equal("", res)
 
-	resArr, err = suite.redis.LRange("req_list_taken", 0, 0).Result()
+	resArr, err = suite.redis.LRange("req_list_taken"+suite.q.GetId(), 0, 0).Result()
 	suite.Require().Nil(err)
 	suite.Empty(resArr)
 }
@@ -153,7 +155,7 @@ func (suite *ReqOpsTestSuite) TestStat() {
 	suite.EqualValues(1, stat.Done)
 }
 
-func (suite *ReqOpsTestSuite) TestDelete()  {
+func (suite *ReqOpsTestSuite) TestDelete() {
 	_, err := suite.q.Put(context.Background(), "abc", 0)
 	suite.Require().Nil(err)
 	var dst string
@@ -164,6 +166,28 @@ func (suite *ReqOpsTestSuite) TestDelete()  {
 	suite.Require().Nil(err)
 	err = suite.q.Delete(context.Background(), taskId)
 	suite.Require().NotNil(err)
+}
+
+func (suite *ReqOpsTestSuite) TestMultipleQueues() {
+	q2, err := suite.fabriq.Create(context.Background(), SetName("yet another queue"))
+	suite.Require().Nil(err)
+
+	taskIdQ1, err := suite.q.Put(context.Background(), "abc", 0)
+	suite.Require().Nil(err)
+
+	taskIdQ2, err := q2.Put(context.Background(), "def", 0)
+	suite.Require().Nil(err)
+
+	var dst string
+	tid, err := suite.q.Take(context.Background(), &dst)
+	suite.Require().Nil(err)
+	suite.Equal(taskIdQ1, tid)
+	suite.Equal("abc", dst)
+
+	tid, err = q2.Take(context.Background(), &dst)
+	suite.Require().Nil(err)
+	suite.Equal(taskIdQ2, tid)
+	suite.Equal("def", dst)
 }
 
 func TestReqOpsTestSuite(t *testing.T) {

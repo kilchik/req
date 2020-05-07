@@ -16,8 +16,8 @@ type ValidateTakenTestSuite struct {
 }
 
 func (suite *ValidateTakenTestSuite) SetupTest() {
-	suite.q = MustConnect(context.Background(), "localhost:6379", "",
-		SetTakeTimeout(1*time.Second), SetTakenValidationPeriod(1*time.Second))
+	suite.q = MustConnect(context.Background()).
+		MustCreate(context.Background(), SetTakeTimeout(1*time.Second), SetTakenValidationPeriod(1*time.Second))
 	suite.redis = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "",
@@ -34,21 +34,21 @@ func (suite *ValidateTakenTestSuite) TestTraverseTaken() {
 	suite.Require().Nil(err)
 
 	// Check that at first there is a single task in taken list and there are no tasks in ready list
-	resArr, err := suite.redis.LRange("req_list_taken", 0, 1).Result()
+	resArr, err := suite.redis.LRange("req_list_taken"+suite.q.GetId(), 0, 1).Result()
 	suite.Require().Nil(err)
 	suite.Require().Len(resArr, 1)
 	suite.Require().Equal(taskId, resArr[0])
-	resArr, err = suite.redis.LRange("req_list_ready", 0, 0).Result()
+	resArr, err = suite.redis.LRange("req_list_ready"+suite.q.GetId(), 0, 0).Result()
 	suite.Require().Nil(err)
 	suite.Require().Empty(resArr)
 
 	time.Sleep(3 * time.Second)
 
 	// Check that after 3 seconds the single task moved from taken list to ready list due to take timeout expiration
-	resArr, err = suite.redis.LRange("req_list_taken", 0, 0).Result()
+	resArr, err = suite.redis.LRange("req_list_taken"+suite.q.GetId(), 0, 0).Result()
 	suite.Require().Nil(err)
 	suite.Require().Empty(resArr)
-	resArr, err = suite.redis.LRange("req_list_ready", 0, 1).Result()
+	resArr, err = suite.redis.LRange("req_list_ready"+suite.q.GetId(), 0, 1).Result()
 	suite.Require().Nil(err)
 	suite.Require().Len(resArr, 1)
 	suite.Require().Equal(taskId, resArr[0])

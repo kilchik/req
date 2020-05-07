@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -16,10 +17,20 @@ import (
 )
 
 func main() {
+	host := flag.String("host", "localhost:6379", "Specify redis host")
+	passwd := flag.String("password", "", "Specify redis password")
+	qname := flag.String("qname", "default", "Specify queue name")
+
+	flag.Parse()
+
 	ctx := context.Background()
-	q, err := req.Connect(ctx, "localhost:6379", "", req.DisableLogger)
+	fabriq, err := req.Connect(ctx, req.DisableLogger, req.SetRedis(*host, *passwd))
 	if err != nil {
-		log.Fatalf("req: connect: %v", err)
+		log.Fatalf("reqctl: connect to redis: %v", err)
+	}
+	q, err := fabriq.Create(ctx, req.SetName(*qname))
+	if err != nil {
+		log.Fatalf("reqctl: create queue with name %q: %v", *qname, err)
 	}
 
 	rdr := bufio.NewReader(os.Stdin)
