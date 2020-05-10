@@ -190,6 +190,60 @@ func (suite *ReqOpsTestSuite) TestMultipleQueues() {
 	suite.Equal("def", dst)
 }
 
+func (suite *ReqOpsTestSuite) TestDelayTask() {
+	taskId, err := suite.q.Put(context.Background(), "abc", 0)
+	suite.Require().Nil(err)
+
+	var dst string
+	_, err = suite.q.Take(context.Background(), &dst)
+	suite.Require().Nil(err)
+
+	err = suite.q.Delay(context.Background(), taskId)
+	suite.Require().Nil(err)
+
+	// Check that the task id is not left in taken list
+	takenCnt, err := suite.redis.LLen("req_list_taken"+suite.q.GetId()).Result()
+	suite.Require().Nil(err)
+	suite.EqualValues(0, takenCnt)
+
+	// Check that the task id is present in delayed tree
+	res, err := suite.redis.ZRange("req_tree_delayed"+suite.q.GetId(), 0, 1).Result()
+	suite.Require().Nil(err)
+	suite.Require().Len(res, 1)
+	suite.Equal(taskId, res[0])
+
+	// Check that task in heap has delay equal to 1 second
+	taskStr, err := suite.redis.Get(taskId).Result()
+	suite.Require().Nil(err)
+	t := &Task{}
+	suite.Require().Nil(json.Unmarshal([]byte(taskStr), t))
+	suite.Equal(1*time.Second, t.Delay)
+
+	_, err = suite.q.Take(context.Background(), &dst)
+	suite.Require().Nil(err)
+	err = suite.q.Delay(context.Background(), taskId)
+	suite.Require().Nil(err)
+
+	started := time.Now()
+	_, err = suite.q.Take(context.Background(), taskId)
+	suite.Require().Nil(err)
+
+	// Check that elapsed time is [1.5, 2.5]s of delay + [0, 1]s of delayed tree traversal
+	elapsed := time.Now().Sub(started)
+	suite.True(time.Now().After(started.Add(3*time.Second / 2)))
+	suite.True(time.Now().Before(started.Add(7*time.Second / 2)))
+
+	err = suite.q.Delay(context.Background(), taskId)
+	suite.Require().Nil(err)
+
+	// Check that task in heap has new delay between [1.5, 2.5) * prev delay + [0, 1]s of delayed tree traversal
+	taskStr, err = suite.redis.Get(taskId).Result()
+	suite.Require().Nil(err)
+	t = &Task{}
+	suite.Require().Nil(json.Unmarshal([]byte(taskStr), t))
+	suite.True(t.Delay >= 3*elapsed/2 && t.Delay < 7*elapsed/2)
+}
+
 func TestReqOpsTestSuite(t *testing.T) {
 	suite.Run(t, new(ReqOpsTestSuite))
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"math/rand"
 	"strconv"
 	"time"
 
@@ -29,28 +29,15 @@ func (q *Q) Put(ctx context.Context, obj interface{}, delay time.Duration) (task
 		Body:  payload,
 	}
 
-	taskStr, err := json.Marshal(&task)
-	if err != nil {
-		return "", errors.Wrap(err, "put: encode task")
-	}
-
-	// Set key-val
-	if err := q.client.Set(taskId, string(taskStr), 0).Err(); err != nil {
-		// TODO: handle error
-		return "", errors.Wrap(err, "put: SET")
+	if err := q.putTaskToHeap(ctx, task); err != nil {
+		return "", errors.Wrap(err, "put task to heap")
 	}
 	q.logger.Debugf(ctx, "successfully put task %q to kv storage", taskId)
 
 	if delay > 0 {
-		q.logger.Debug(ctx, float64(time.Now().Add(delay).Unix()))
-		if err := q.client.ZAdd(keyTreeDelayed(q.id), &redis.Z{
-			Score:  float64(time.Now().Add(delay).Unix()),
-			Member: taskId,
-		}).Err(); err != nil {
-			// TODO: handle error
-			return "", errors.Wrap(err, "put: ZADD")
+		if err := q.putTaskIdToDelayedTree(ctx, taskId, delay); err != nil {
+			return "", errors.Wrap(err, "put task id to delayed tree")
 		}
-		q.logger.Debugf(ctx, "successfully put task %q to delayed tree", taskId)
 	} else {
 		// Lpush task id to ready list
 		if err := q.client.LPush(keyListReady(q.id), taskId).Err(); err != nil {
@@ -88,30 +75,26 @@ func (q *Q) Take(ctx context.Context, obj interface{}) (id string, err error) {
 				continue
 			}
 
-			log.Printf("take: BRPOPLPUSH: %v", err)
 			time.Sleep(retryTimeout())
 			continue
 		}
 		q.logger.Debugf(ctx, "successfully got task id %q from ready list", taskId)
 
-		// Retrieve task body from storage
-		taskStr, err := q.client.Get(taskId).Result()
-		q.logger.Debugf(ctx, "successfully got task itself %q from kv storage", taskStr)
-		task := &Task{}
-		if err := json.Unmarshal([]byte(taskStr), task); err != nil {
-			// TODO: handle
-			return "", errors.Wrap(err, "decode task")
+		task, err := q.getTaskFromHeap(ctx, taskId)
+		if err != nil {
+			return "", errors.Wrap(err, "get task by id")
 		}
-		q.logger.Debugf(ctx, "successfully decoded task to %v", task)
 		if task.Id != taskId {
 			// TODO: handle
 			return "", errors.New("smth bad happened")
 		}
 
+
 		// Set time when task was taken
 		task.TakenAt = time.Now()
-		taskNewStr, _ := json.Marshal(task)
-		q.client.Set(taskId, taskNewStr, 0)
+		if err := q.putTaskToHeap(ctx, task); err != nil {
+			return "", errors.Wrap(err, "put task to heap")
+		}
 
 		// Extract payload
 		if err := json.Unmarshal(task.Body, &obj); err != nil {
@@ -184,5 +167,79 @@ func (q *Q) Delete(ctx context.Context, taskId string) error {
 	if err := q.client.Del(taskId).Err(); err != nil {
 		return errors.Wrapf(err, "delete: DEL %q", taskId)
 	}
+	return nil
+}
+
+func newExpDelayWithJitter(delay time.Duration) time.Duration {
+	if delay == 0 {
+		return 1*time.Second
+	}
+	return delay + time.Duration(float64(delay) * (rand.Float64() + 0.5))
+}
+
+// Move task from taken list to delayed tree with score equal to next exp value
+func (q *Q) Delay(ctx context.Context, taskId string) error {
+	task, err := q.getTaskFromHeap(ctx, taskId)
+	if err != nil {
+		return errors.Wrapf(err, "get task by id %q", taskId)
+	}
+	task.Delay = newExpDelayWithJitter(task.Delay)
+	if err := q.putTaskToHeap(ctx, task); err != nil {
+		return errors.Wrap(err, "put task to heap")
+	}
+	if err := q.putTaskIdToDelayedTree(ctx, taskId, task.Delay); err != nil {
+		return errors.Wrap(err, "put task id to delayed tree")
+	}
+	if err := q.client.LRem(keyListTaken(q.id), -1, taskId).Err(); err != nil {
+		// TODO: retry error
+		return errors.Wrap(err, "delay: LREM")
+	}
+	return nil
+}
+
+// TODO: make abstract redis layer
+// Retrieve task body from storage
+func (q *Q) getTaskFromHeap(ctx context.Context, id string) (*Task, error) {
+	taskStr, err := q.client.Get(id).Result()
+	if err != nil {
+		return nil, errors.Wrap(err, "GET task by id")
+	}
+	q.logger.Debugf(ctx, "successfully got task itself %q from kv storage", taskStr)
+
+	task := &Task{}
+	if err := json.Unmarshal([]byte(taskStr), task); err != nil {
+		// TODO: handle
+		return nil, errors.Wrap(err, "decode task")
+	}
+
+	q.logger.Debugf(ctx, "successfully decoded task to %v", task)
+	return task, nil
+}
+
+func (q *Q) putTaskToHeap(ctx context.Context, task *Task) error {
+	taskStr, err := json.Marshal(&task)
+	if err != nil {
+		return errors.Wrap(err, "put: encode task")
+	}
+
+	// Set key-val
+	if err := q.client.Set(task.Id, string(taskStr), 0).Err(); err != nil {
+		// TODO: handle error
+		return errors.Wrap(err, "put: SET")
+	}
+
+	return nil
+}
+
+func (q *Q) putTaskIdToDelayedTree(ctx context.Context, id string, delay time.Duration) error {
+	q.logger.Debug(ctx, float64(time.Now().Add(delay).Unix()))
+	if err := q.client.ZAdd(keyTreeDelayed(q.id), &redis.Z{
+		Score:  float64(time.Now().Add(delay).Unix()),
+		Member: id,
+	}).Err(); err != nil {
+		// TODO: handle error
+		return errors.Wrap(err, "put: ZADD")
+	}
+	q.logger.Debugf(ctx, "successfully put task %q to delayed tree", id)
 	return nil
 }
