@@ -20,17 +20,47 @@ func main() {
 	host := flag.String("host", "localhost:6379", "Specify redis host")
 	passwd := flag.String("password", "", "Specify redis password")
 	qname := flag.String("qname", "default", "Specify queue name")
+	sentinels := flag.String("sentinels", "", "Specify sentinels list using ; as separator")
+	masterName := flag.String("master", "", "Specify sentinel master name")
 
 	flag.Parse()
 
+	if *sentinels != "" {
+		if *masterName == "" {
+			fmt.Println("you must specify master name to use sentinel mode")
+			return
+		}
+	}
+
+	if *masterName != "" {
+		if *sentinels == "" {
+			fmt.Println("you must specify sentinels list to use sentinel mode")
+			return
+		}
+	}
+
+	connectOpts := []func(f *req.Fabriq) error{req.DisableLogger}
+	if *sentinels != "" {
+		sentinelsArr := strings.Split(*sentinels, ";")
+		connectOpts = append(connectOpts, req.UseSentinel(*masterName, *passwd, sentinelsArr))
+	} else if *host != "" {
+		connectOpts = append(connectOpts, req.SetRedis(*host, *passwd))
+	}
+
 	ctx := context.Background()
-	fabriq, err := req.Connect(ctx, req.DisableLogger, req.SetRedis(*host, *passwd))
+	fabriq, err := req.Connect(ctx, connectOpts...)
 	if err != nil {
 		log.Fatalf("reqctl: connect to redis: %v", err)
 	}
-	q, err := fabriq.Create(ctx, req.SetName(*qname))
+
+	var createOpts []func(q *req.Q) error
+	if *qname != "default" {
+		createOpts = append(createOpts, req.SetName(*qname))
+	}
+
+	q, err := fabriq.Create(ctx, createOpts...)
 	if err != nil {
-		log.Fatalf("reqctl: create queue with name %q: %v", *qname, err)
+		log.Fatalf("reqctl: create queue: %v", err)
 	}
 
 	rdr := bufio.NewReader(os.Stdin)
