@@ -244,6 +244,56 @@ func (suite *ReqOpsTestSuite) TestDelayTask() {
 	suite.True(t.Delay >= 3*elapsed/2 && t.Delay < 7*elapsed/2)
 }
 
+func (suite *ReqOpsTestSuite) TestBury() {
+	taskId, err := suite.q.Put(context.Background(), "abc", 0)
+	suite.Require().Nil(err)
+
+	var dst string
+	taskId, err = suite.q.Take(context.Background(), &dst)
+	suite.Require().Nil(err)
+
+	err = suite.q.Bury(context.Background(), taskId)
+	suite.Require().Nil(err)
+
+	l, err := suite.redis.LLen("req_list_taken"+suite.q.GetId()).Result()
+	suite.Require().Nil(err)
+	suite.EqualValues(0, l)
+	l, err = suite.redis.SCard("req_set_buried"+suite.q.GetId()).Result()
+	suite.Require().Nil(err)
+	suite.EqualValues(1, l)
+	id, err := suite.redis.SRandMember("req_set_buried"+suite.q.GetId()).Result()
+	suite.Require().Nil(err)
+	suite.EqualValues(taskId, id)
+}
+
+func (suite *ReqOpsTestSuite) TestKick() {
+	taskId, err := suite.q.Put(context.Background(), "abc", 0)
+	suite.Require().Nil(err)
+
+	var dst string
+	taskId, err = suite.q.Take(context.Background(), &dst)
+	suite.Require().Nil(err)
+
+	err = suite.q.Bury(context.Background(), taskId)
+	suite.Require().Nil(err)
+
+	err = suite.q.Kick(context.Background(), taskId)
+	suite.Require().Nil(err)
+
+	l, err := suite.redis.SCard("req_set_buried"+suite.q.GetId()).Result()
+	suite.Require().Nil(err)
+	suite.EqualValues(0, l)
+	l, err = suite.redis.LLen("req_list_ready"+suite.q.GetId()).Result()
+	suite.Require().Nil(err)
+	suite.EqualValues(1, l)
+	l, err = suite.redis.LLen("req_list_taken"+suite.q.GetId()).Result()
+	suite.Require().Nil(err)
+	suite.EqualValues(0, l)
+	id, err := suite.q.Take(context.Background(), &dst)
+	suite.Require().Nil(err)
+	suite.Equal(taskId, id)
+}
+
 func TestReqOpsTestSuite(t *testing.T) {
 	suite.Run(t, new(ReqOpsTestSuite))
 }

@@ -121,6 +121,85 @@ func main() {
 			if err := q.Ack(ctx, tokens[1]); err != nil {
 				printError("ack: %v", err)
 			}
+
+		case "delete":
+			if len(tokens) != 2 {
+				printError("invalid args")
+				continue
+			}
+			if _, err := uuid.Parse(tokens[1]); err != nil {
+				printError("invalid uuid")
+				continue
+			}
+			if err := q.Delete(ctx, tokens[1]); err != nil {
+				printError("delete: %v", err)
+			}
+
+		case "delay":
+			if len(tokens) != 2 {
+				printError("invalid args")
+				continue
+			}
+			if _, err := uuid.Parse(tokens[1]); err != nil {
+				printError("invalid uuid")
+				continue
+			}
+			if err := q.Delay(ctx, tokens[1]); err != nil {
+				printError("delay: %v", err)
+			}
+
+		case "stat":
+			if len(tokens) != 1 {
+				printError("invalid args")
+				continue
+			}
+			s, err := q.Stat(ctx)
+			if err != nil {
+				printError("stat: %v", err)
+				continue
+			}
+			printSuccess(formatStat(s))
+
+		case "bury":
+			if len(tokens) != 2 {
+				printError("invalid args")
+				continue
+			}
+			if _, err := uuid.Parse(tokens[1]); err != nil {
+				printError("invalid uuid")
+				continue
+			}
+			if err := q.Bury(ctx, tokens[1]); err != nil {
+				printError("bury: %v", err)
+			}
+
+		case "kick":
+			if len(tokens) != 2 {
+				printError("invalid args")
+				continue
+			}
+			if _, err := uuid.Parse(tokens[1]); err != nil {
+				printError("invalid uuid")
+				continue
+			}
+			if err := q.Kick(ctx, tokens[1]); err != nil {
+				printError("kick: %v", err)
+			}
+
+		case "kickall":
+			if len(tokens) != 1 {
+				printError("invalid args")
+				continue
+			}
+			if err := q.KickAll(ctx); err != nil {
+				printError("kick all: %v", err)
+			}
 		}
+		fmt.Println()
 	}
+}
+
+func formatStat(s *req.Stat) string {
+	return fmt.Sprintf("%-10s%7d\n%-10s%7d\n%-10s%7d\n%-10s%7d\n%-10s%7d",
+		"done",s.Done, "ready",s.Ready, "taken",s.Taken, "delayed", s.Delayed, "buried",s.Buried)
 }

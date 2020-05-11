@@ -125,7 +125,7 @@ func (q *Q) Ack(ctx context.Context, id string) error {
 }
 
 type Stat struct {
-	Ready, Taken, Delayed, Done int64
+	Ready, Taken, Delayed, Done, Buried int64
 }
 
 func (q *Q) Stat(ctx context.Context) (*Stat, error) {
@@ -146,11 +146,19 @@ func (q *Q) Stat(ctx context.Context) (*Stat, error) {
 	var doneStr string
 	doneStr, err = q.client.Get(keyCounterDone(q.id)).Result()
 	if err != nil {
-		return nil, errors.Wrap(err, "stat: GET done")
+		if err != redis.Nil {
+			return nil, errors.Wrap(err, "stat: GET done")
+		}
+		res.Done = 0
+	} else {
+		res.Done, err = strconv.ParseInt(doneStr, 10, 64)
+		if err != nil {
+			return nil, errors.Wrap(err, "stat: parse done string")
+		}
 	}
-	res.Done, err = strconv.ParseInt(doneStr, 10, 64)
+	res.Buried, err = q.client.SCard(keySetBuried(q.id)).Result()
 	if err != nil {
-		return nil, errors.Wrap(err, "stat: parse done string")
+		return nil, errors.Wrap(err, "stat: SCARD buried")
 	}
 	return res, nil
 }
@@ -193,6 +201,50 @@ func (q *Q) Delay(ctx context.Context, taskId string) error {
 	if err := q.client.LRem(keyListTaken(q.id), -1, taskId).Err(); err != nil {
 		// TODO: retry error
 		return errors.Wrap(err, "delay: LREM")
+	}
+	return nil
+}
+
+// Move task id from taken list to buried set
+func (q *Q) Bury(ctx context.Context, taskId string) error {
+	if err := q.client.SAdd(keySetBuried(q.id), taskId).Err(); err != nil {
+		return errors.Wrap(err, "bury: SADD to buried set")
+	}
+	if err := q.client.LRem(keyListTaken(q.id), 1, taskId).Err(); err != nil {
+		return errors.Wrap(err, "bury: LREM from taken list")
+	}
+	return nil
+}
+
+// Move task id from buried set to ready list
+func (q *Q) Kick(ctx context.Context, taskId string) error {
+	if err := q.client.LPush(keyListReady(q.id), taskId).Err(); err != nil {
+		return errors.Wrap(err, "kick: LPUSH task id to ready list")
+	}
+	if err := q.client.SRem(keySetBuried(q.id), taskId).Err(); err != nil {
+		return errors.Wrap(err, "kick: SREM task id from buried set")
+	}
+	return nil
+}
+
+// Move all task ids from buried set to ready list
+func (q *Q) KickAll(ctx context.Context) error {
+	for {
+		lock, err := q.locker.Obtain(lockKickAllInProgress(q.id), 10*time.Minute, nil)
+		if err != nil {
+			return errors.Wrap(err, "kick all: obtain lock")
+		}
+		defer lock.Release()
+		taskId, err := q.client.SRandMember(keySetBuried(q.id)).Result()
+		if err != nil {
+			if err == redis.Nil {
+				break
+			}
+			return errors.Wrap(err, "kick all: SRANDMEMBER")
+		}
+		if err := q.Kick(ctx, taskId); err != nil {
+			return errors.Wrapf(err, "kick all: kick %q", taskId)
+		}
 	}
 	return nil
 }
