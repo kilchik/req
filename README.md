@@ -51,8 +51,8 @@ type task struct {
     Body string
 }
 
-taskId, err := suite.q.Put(context.Background(), &task{"Get things done"}, 0)
+taskId, err := q.Put(context.Background(), &task{"Get things done"}, 0)
 
 var dst task
-id, err := suite.q.Take(context.Background(), &dst)
+id, err := q.Take(context.Background(), &dst)
 ```
