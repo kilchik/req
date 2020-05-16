@@ -42,7 +42,7 @@ func (suite *ValidateTakenTestSuite) TestTraverseTaken() {
 	suite.Require().Nil(err)
 	suite.Require().Empty(resArr)
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(4 * time.Second)
 
 	// Check that after 3 seconds the single task moved from taken list to ready list due to take timeout expiration
 	resArr, err = suite.redis.LRange("req_list_taken"+suite.q.GetId(), 0, 0).Result()

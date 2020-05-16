@@ -77,6 +77,22 @@ func (f *Fabriq) MustCreate(ctx context.Context, options ...func(q *Q) error) *Q
 	return q
 }
 
+func (f *Fabriq) CreateWithHandler(ctx context.Context, task interface{}, handler HandlerFunc, options ...func(q *Q) error) (*AsynQ, error) {
+	q, err := f.Create(ctx, options...)
+	if err != nil {
+		return nil, errors.Wrap(err, "create queue")
+	}
+	return NewAsynQ(ctx, q, task, handler), nil
+}
+
+func (f *Fabriq) MustCreateWithHandler(ctx context.Context, task interface{}, handler HandlerFunc, options ...func(q *Q) error) (*AsynQ) {
+	aq, err := f.CreateWithHandler(ctx, task, handler)
+	if err != nil {
+		panic(err)
+	}
+	return aq
+}
+
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
