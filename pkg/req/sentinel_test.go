@@ -1,3 +1,5 @@
+// +build sentinel
+
 package req
 
 import (
