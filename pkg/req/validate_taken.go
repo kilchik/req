@@ -46,7 +46,7 @@ func (q *Q) validateTaken(ctx context.Context, period time.Duration) {
 					q.logger.Errorf(ctx, "validate taken: convert ts string to int: %v", err)
 					continue
 				}
-				if time.Unix(ts, 0).Add(period).Before(time.Now()) {
+				if time.Unix(ts, 0).Add(period).After(time.Now()) {
 					q.logger.Infof(ctx, "validate taken: not enough time has passed since last traversal")
 					continue
 				}

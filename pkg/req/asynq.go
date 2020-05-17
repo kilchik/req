@@ -42,7 +42,6 @@ func NewAsynQ(ctx context.Context, q *Q, task interface{}, handler HandlerFunc) 
 				return
 			default:
 				taskId, err := q.Take(ctx, &task)
-				fmt.Println("<<<", task)
 				if err != nil {
 					q.logger.Errorf(ctx, "take next task: %v", err)
 					time.Sleep(delay())
