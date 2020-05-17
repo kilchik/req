@@ -43,18 +43,44 @@ First you need to initialize queue fabric that will create different queues with
 
 ```
 fabriq, err := req.Connect(ctx, connectOpts...)
+```
+
+Connect options include:
+- specifying redis host via `req.SetRedis`
+- specifying sentinel master via `req.UseSentinel`
+
+You can use the package in both synchronous and asynchronous manner:
+
+```
 q, err := fabriq.Create(ctx, createOpts...)
-```
 
-And you are ready to go.
-
-```
 type task struct {
     Body string
 }
 
-taskId, err := q.Put(context.Background(), &task{"Get things done"}, 0)
+taskId, err := q.Put(ctx, &task{"Get things done"}, time.Second)
 
 var dst task
 id, err := q.Take(context.Background(), &dst)
 ```
+
+or
+
+```
+func handleTask(ctx context.Context, taskId string, taskIface interface{}) error {
+    t := taskIface.(*task)
+    ...
+}
+
+asynq, _ := fabriq.CreateWithHandler(ctx, &task{}, handleTask)
+err := asynq.Put(ctx, &task{"Get things done"}, time.Second)
+```
+
+If you choose `AsynQ`, you can control the task flow by returning typed errors from handler:
+- by returning `req.NewErrorFatal(fmt string, args ...interface{})` you make sure that the task will be deleted from queue
+- by returning `req.NewErrorTemp(fmt string, args ...interface{})` you can delay tasks that can't be executed right now
+- by returning `req.NewErrorUnknown(fmt string, args ...interface{})` you can bury tasks for manual parsing
+
+If handler returns `nil` the task is acked.
+
+For a complete async example please look at _cmd/examples_.
