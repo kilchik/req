@@ -108,11 +108,11 @@ func (suite *ReqOpsTestSuite) TestTake() {
 }
 
 func (suite *ReqOpsTestSuite) TestAck() {
-	taskId, err := suite.q.Put(context.Background(), "abc", 0)
+	_, err := suite.q.Put(context.Background(), "abc", 0)
 	suite.Require().Nil(err)
 
 	var dst string
-	taskId, err = suite.q.Take(context.Background(), &dst)
+	taskId, err := suite.q.Take(context.Background(), &dst)
 	suite.Require().Nil(err)
 	resArr, err := suite.redis.LRange("req_list_taken"+suite.q.GetId(), 0, 1).Result()
 	suite.Require().Nil(err)
@@ -202,7 +202,7 @@ func (suite *ReqOpsTestSuite) TestDelayTask() {
 	suite.Require().Nil(err)
 
 	// Check that the task id is not left in taken list
-	takenCnt, err := suite.redis.LLen("req_list_taken"+suite.q.GetId()).Result()
+	takenCnt, err := suite.redis.LLen("req_list_taken" + suite.q.GetId()).Result()
 	suite.Require().Nil(err)
 	suite.EqualValues(0, takenCnt)
 
@@ -230,8 +230,8 @@ func (suite *ReqOpsTestSuite) TestDelayTask() {
 
 	// Check that elapsed time is [1.5, 2.5]s of delay + [0, 1]s of delayed tree traversal
 	elapsed := time.Now().Sub(started)
-	suite.True(time.Now().After(started.Add(3*time.Second / 2)))
-	suite.True(time.Now().Before(started.Add(7*time.Second / 2)))
+	suite.True(time.Now().After(started.Add(3 * time.Second / 2)))
+	suite.True(time.Now().Before(started.Add(7 * time.Second / 2)))
 
 	err = suite.q.Delay(context.Background(), taskId)
 	suite.Require().Nil(err)
@@ -245,33 +245,33 @@ func (suite *ReqOpsTestSuite) TestDelayTask() {
 }
 
 func (suite *ReqOpsTestSuite) TestBury() {
-	taskId, err := suite.q.Put(context.Background(), "abc", 0)
+	_, err := suite.q.Put(context.Background(), "abc", 0)
 	suite.Require().Nil(err)
 
 	var dst string
-	taskId, err = suite.q.Take(context.Background(), &dst)
+	taskId, err := suite.q.Take(context.Background(), &dst)
 	suite.Require().Nil(err)
 
 	err = suite.q.Bury(context.Background(), taskId)
 	suite.Require().Nil(err)
 
-	l, err := suite.redis.LLen("req_list_taken"+suite.q.GetId()).Result()
+	l, err := suite.redis.LLen("req_list_taken" + suite.q.GetId()).Result()
 	suite.Require().Nil(err)
 	suite.EqualValues(0, l)
-	l, err = suite.redis.SCard("req_set_buried"+suite.q.GetId()).Result()
+	l, err = suite.redis.SCard("req_set_buried" + suite.q.GetId()).Result()
 	suite.Require().Nil(err)
 	suite.EqualValues(1, l)
-	id, err := suite.redis.SRandMember("req_set_buried"+suite.q.GetId()).Result()
+	id, err := suite.redis.SRandMember("req_set_buried" + suite.q.GetId()).Result()
 	suite.Require().Nil(err)
 	suite.EqualValues(taskId, id)
 }
 
 func (suite *ReqOpsTestSuite) TestKick() {
-	taskId, err := suite.q.Put(context.Background(), "abc", 0)
+	_, err := suite.q.Put(context.Background(), "abc", 0)
 	suite.Require().Nil(err)
 
 	var dst string
-	taskId, err = suite.q.Take(context.Background(), &dst)
+	taskId, err := suite.q.Take(context.Background(), &dst)
 	suite.Require().Nil(err)
 
 	err = suite.q.Bury(context.Background(), taskId)
@@ -280,13 +280,13 @@ func (suite *ReqOpsTestSuite) TestKick() {
 	err = suite.q.Kick(context.Background(), taskId)
 	suite.Require().Nil(err)
 
-	l, err := suite.redis.SCard("req_set_buried"+suite.q.GetId()).Result()
+	l, err := suite.redis.SCard("req_set_buried" + suite.q.GetId()).Result()
 	suite.Require().Nil(err)
 	suite.EqualValues(0, l)
-	l, err = suite.redis.LLen("req_list_ready"+suite.q.GetId()).Result()
+	l, err = suite.redis.LLen("req_list_ready" + suite.q.GetId()).Result()
 	suite.Require().Nil(err)
 	suite.EqualValues(1, l)
-	l, err = suite.redis.LLen("req_list_taken"+suite.q.GetId()).Result()
+	l, err = suite.redis.LLen("req_list_taken" + suite.q.GetId()).Result()
 	suite.Require().Nil(err)
 	suite.EqualValues(0, l)
 	id, err := suite.q.Take(context.Background(), &dst)

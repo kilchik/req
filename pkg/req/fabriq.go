@@ -85,7 +85,7 @@ func (f *Fabriq) CreateWithHandler(ctx context.Context, task interface{}, handle
 	return NewAsynQ(ctx, q, task, handler), nil
 }
 
-func (f *Fabriq) MustCreateWithHandler(ctx context.Context, task interface{}, handler HandlerFunc, options ...func(q *Q) error) (*AsynQ) {
+func (f *Fabriq) MustCreateWithHandler(ctx context.Context, task interface{}, handler HandlerFunc, options ...func(q *Q) error) *AsynQ {
 	aq, err := f.CreateWithHandler(ctx, task, handler)
 	if err != nil {
 		panic(err)

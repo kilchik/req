@@ -2,12 +2,12 @@ package req
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/bsm/redislock"
+	"github.com/pkg/errors"
 )
 
 // Runs at most once in period
@@ -30,7 +30,7 @@ func (q *Q) validateTaken(ctx context.Context, period time.Duration) {
 			lock, err = q.locker.Obtain(lockTakenValidation(q.id), period, nil)
 			if err != nil {
 				if err == redislock.ErrNotObtained {
-					// If another pod is already validating taken
+					// If another pod is already validating taken tasks
 					q.logger.Warn(ctx, "validate taken: ERR_NOT_OBTAINED")
 				} else {
 					q.logger.Warnf(ctx, "validate taken: lock tree: %v", err)
@@ -38,18 +38,11 @@ func (q *Q) validateTaken(ctx context.Context, period time.Duration) {
 				continue
 			}
 
-			// Check last validation timestamp
-			tsStr, err := q.client.Get(keyLastValidationTs(q.id)).Result()
-			if err == nil {
-				ts, err := strconv.ParseInt(tsStr, 10, 64)
-				if err != nil {
-					q.logger.Errorf(ctx, "validate taken: convert ts string to int: %v", err)
-					continue
-				}
-				if time.Unix(ts, 0).Add(period).After(time.Now()) {
-					q.logger.Infof(ctx, "validate taken: not enough time has passed since last traversal")
-					continue
-				}
+			// Check last validation timestamp to make sure that multiple clients do not run this check more than once in period
+			t, err := q.getLastValidationTime()
+			if err == nil && t.Add(period).After(time.Now()) {
+				q.logger.Infof(ctx, "validate taken: not enough time has passed since last traversal")
+				continue
 			}
 
 			// Traverse all taken and compare if they are taken for too long
@@ -72,27 +65,16 @@ func (q *Q) validateTaken(ctx context.Context, period time.Duration) {
 				continue
 			}
 			for _, taskId := range res {
-				task, err := q.client.Get(taskId).Result()
+				t, err := q.getTaskFromHeap(ctx, taskId)
 				if err != nil {
-					q.logger.Errorf(ctx, "validate taken: GET %q: %v", err)
-					continue
-				}
-				t := &Task{}
-				if err := json.Unmarshal([]byte(task), t); err != nil {
-					q.logger.Errorf(ctx, "validate taken: decode task: %v", err)
+					q.logger.Errorf(ctx, "validate taken: get task from heap: %v", err)
 					continue
 				}
 				timeDefault := time.Time{}
 				if t.TakenAt != timeDefault && t.TakenAt.Before(time.Now().Add(-q.takeTimeout)) {
 					q.logger.Errorf(ctx, "validate taken: task %q was taken at %v; moving it back to 'ready' list...", taskId, t.TakenAt)
-					if err := q.client.LPush(keyListReady(q.id), taskId).Err(); err != nil {
-						q.logger.Errorf(ctx, "validate taken: put task %q back to ready list: %v", err)
-						// TODO: handle error
-						continue
-					}
-					if err := q.client.LRem(keyListTaken(q.id), 1, taskId).Err(); err != nil {
-						// TODO: retry and handle
-						q.logger.Errorf(ctx, "validate taken: LREM task %q from taken list: %v", taskId, err)
+					if err := q.moveTakenToReady(ctx, taskId); err != nil {
+						q.logger.Errorf(ctx, "validate taken: move task %q from taken to ready list: %v", err)
 						continue
 					}
 				}
@@ -101,4 +83,27 @@ func (q *Q) validateTaken(ctx context.Context, period time.Duration) {
 			lock.Release()
 		}
 	}
+}
+
+func (q *Q) getLastValidationTime() (*time.Time, error) {
+	tsStr, err := q.client.Get(keyLastValidationTs(q.id)).Result()
+	if err != nil {
+		return nil, errors.Wrap(err, "GET last validation ts")
+	}
+	ts, err := strconv.ParseInt(tsStr, 10, 64)
+	if err != nil {
+		return nil, errors.Wrap(err, "convert ts string to int")
+	}
+	t := time.Unix(ts, 0)
+	return &t, nil
+}
+
+func (q *Q) moveTakenToReady(ctx context.Context, taskId string) error {
+	if err := q.client.LPush(keyListReady(q.id), taskId).Err(); err != nil {
+		return errors.Wrap(err, "LPUSH to ready list")
+	}
+	if err := q.client.LRem(keyListTaken(q.id), 1, taskId).Err(); err != nil {
+		return errors.Wrap(err, "LREM from taken list")
+	}
+	return nil
 }

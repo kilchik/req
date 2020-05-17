@@ -1,4 +1,4 @@
-![integration tests](https://github.com/kilchik/req/workflows/Run%20integration%20tests/badge.svg)
+![tests](https://github.com/kilchik/req/workflows/Run%20integration%20tests/badge.svg)
 
 **req** is redis-based reliable queue with sentinel failover support and at-least-once delivery guarantee.  
 The package implements fat client to redis and does not rely on any specific redis procedures except basic type operations.  
@@ -72,7 +72,7 @@ func handleTask(ctx context.Context, taskId string, taskIface interface{}) error
     ...
 }
 
-asynq, _ := fabriq.CreateWithHandler(ctx, &task{}, handleTask)
+asynq, err := fabriq.CreateWithHandler(ctx, &task{}, handleTask)
 err := asynq.Put(ctx, &task{"Get things done"}, time.Second)
 ```
 

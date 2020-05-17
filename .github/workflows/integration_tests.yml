@@ -1,4 +1,4 @@
-name: Run integration tests
+name: tests
 
 
 on:

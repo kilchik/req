@@ -11,7 +11,7 @@ import (
 
 type AsynqTestSuite struct {
 	suite.Suite
-	fabriq      *Fabriq
+	fabriq *Fabriq
 	redis  *redis.Client
 }
 
@@ -36,14 +36,13 @@ func (suite *AsynqTestSuite) TestHallelujahWithAsyncHandler() {
 	})
 
 	for _, l := range "Hallelujah" {
-		err := aq.Put(context.Background(), &concatTask{NewLetter:string(l)}, 0)
+		err := aq.Put(context.Background(), &concatTask{NewLetter: string(l)}, 0)
 		suite.Require().Nil(err)
 	}
-	time.Sleep(2*time.Second)
+	time.Sleep(2 * time.Second)
 	suite.Equal("Hallelujah", res)
 }
 
 func TestAsynqTestSuite(t *testing.T) {
 	suite.Run(t, new(AsynqTestSuite))
 }
-

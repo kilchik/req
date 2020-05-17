@@ -201,5 +201,5 @@ func main() {
 
 func formatStat(s *req.Stat) string {
 	return fmt.Sprintf("%-10s%7d\n%-10s%7d\n%-10s%7d\n%-10s%7d\n%-10s%7d",
-		"done",s.Done, "ready",s.Ready, "taken",s.Taken, "delayed", s.Delayed, "buried",s.Buried)
+		"done", s.Done, "ready", s.Ready, "taken", s.Taken, "delayed", s.Delayed, "buried", s.Buried)
 }

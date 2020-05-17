@@ -10,8 +10,8 @@ import (
 type HandlerFunc func(ctx context.Context, taskId string, task interface{}) error
 
 var (
-	errorFatal = errors.New("fatal error")
-	errorTemp = errors.New("temp error")
+	errorFatal   = errors.New("fatal error")
+	errorTemp    = errors.New("temp error")
 	errorUnknown = errors.New("unknown error")
 )
 

@@ -85,11 +85,11 @@ func (suite *SentinelTestSuite) TestCommands() {
 	suite.redis.FlushAll()
 
 	suite.Run("ack", func() {
-		taskId, err := suite.q.Put(context.Background(), "abc", 0)
+		_, err := suite.q.Put(context.Background(), "abc", 0)
 		suite.Require().Nil(err)
 
 		var dst string
-		taskId, err = suite.q.Take(context.Background(), &dst)
+		taskId, err := suite.q.Take(context.Background(), &dst)
 		suite.Require().Nil(err)
 		resArr, err := suite.redis.LRange("req_list_taken"+suite.q.GetId(), 0, 1).Result()
 		suite.Require().Nil(err)
