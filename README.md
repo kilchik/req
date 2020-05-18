@@ -1,4 +1,5 @@
 ![tests](https://github.com/kilchik/req/workflows/tests/badge.svg)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kilchik/req)](https://goreportcard.com/report/github.com/kilchik/req)
 
 **req** is redis-based reliable queue with sentinel failover support and at-least-once delivery guarantee.  
 The package implements fat client to redis and does not rely on any specific redis procedures except basic type operations.  
