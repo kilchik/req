@@ -1,4 +1,5 @@
 ![tests](https://github.com/kilchik/req/workflows/tests/badge.svg)
+[![codecov](https://codecov.io/gh/kilchik/req/branch/master/graph/badge.svg)](https://codecov.io/gh/kilchik/req)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kilchik/req)](https://goreportcard.com/report/github.com/kilchik/req)
 
 **req** is redis-based reliable queue with sentinel failover support and at-least-once delivery guarantee.  
