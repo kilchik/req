@@ -36,6 +36,7 @@ jobs:
       run: go test -race -coverprofile=coverage.txt -v ./...
 
     - name: Upload coverage to Codecov
+      if: ${{ always() }}
       uses: codecov/codecov-action@v1
       with:
         file: ./coverage.txt
