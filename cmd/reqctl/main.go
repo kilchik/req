@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chzyer/readline"
 	"github.com/google/uuid"
 	"github.com/kilchik/req/pkg/req"
 )
@@ -63,20 +63,30 @@ func main() {
 		log.Fatalf("reqctl: create queue: %v", err)
 	}
 
-	rdr := bufio.NewReader(os.Stdin)
+	lineRdr, err := readline.NewEx(&readline.Config{
+		Prompt:            "> ",
+		HistoryFile:       "/tmp/reqctl_history.tmp",
+		InterruptPrompt:   "^C",
+		EOFPrompt:         "exit",
+		HistorySearchFold: true,
+	})
+	if err != nil {
+		log.Fatalf("reqctl: create line reader")
+	}
+
 	for {
-		printPrompt()
-		str, err := rdr.ReadString('\n')
+		str, err := lineRdr.Readline()
 		if err != nil {
-			if err == io.EOF {
-				break
+			if err != readline.ErrInterrupt && err != io.EOF {
+				fmt.Fprintf(os.Stderr, "read line: %v", err)
 			}
-			fmt.Fprintf(os.Stderr, "read line: %v", err)
+			break
 		}
+
 		if str == "" {
 			continue
 		}
-		tokens := strings.Split(str[:len(str)-1], " ")
+		tokens := strings.Split(str, " ")
 		switch tokens[0] {
 		case "put":
 			if len(tokens) != 3 {
