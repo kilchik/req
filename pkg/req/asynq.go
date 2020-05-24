@@ -38,6 +38,7 @@ func NewAsynQ(ctx context.Context, q *Q, task interface{}, handler HandlerFunc) 
 		for {
 			select {
 			case <-ctx.Done():
+				q.logger.Infof(ctx, "stopped on context signal")
 				return
 			default:
 				taskId, err := q.Take(ctx, &task)
