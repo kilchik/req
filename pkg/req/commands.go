@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Put puts object of any type into queue and returns unique identifier for it.
 func (q *Q) Put(ctx context.Context, obj interface{}, delay time.Duration) (taskId string, err error) {
 	// Serialize obj
 	payload, err := json.Marshal(obj)
@@ -58,6 +59,8 @@ func timeoutExp() func() time.Duration {
 	}
 }
 
+// Take returns next task from queue in FIFO order. If queue is empty the call will be blocked until any task is put
+// into queue or context is canceled. The task will not be automatically removed or acknowledged by this action.
 func (q *Q) Take(ctx context.Context, obj interface{}) (id string, err error) {
 	retryTimeout := timeoutExp()
 	for {
@@ -105,6 +108,7 @@ func (q *Q) Take(ctx context.Context, obj interface{}) (id string, err error) {
 	}
 }
 
+// Ack acknowledges task completion.
 func (q *Q) Ack(ctx context.Context, id string) error {
 	if err := q.client.LRem(keyListTaken(q.id), -1, id).Err(); err != nil {
 		// TODO: retry error
@@ -127,6 +131,7 @@ type Stat struct {
 	Ready, Taken, Delayed, Done, Buried int64
 }
 
+// Stat returns statistics on tasks currently present in tree and number of done tasks overall.
 func (q *Q) Stat(ctx context.Context) (*Stat, error) {
 	res := &Stat{}
 	var err error
@@ -162,7 +167,7 @@ func (q *Q) Stat(ctx context.Context) (*Stat, error) {
 	return res, nil
 }
 
-// Deletes task if it is present in taken list
+// Delete removes task from queue if it is currently taken.
 func (q *Q) Delete(ctx context.Context, taskId string) error {
 	deleted, err := q.client.LRem(keyListTaken(q.id), 1, taskId).Result()
 	if err != nil {
@@ -184,7 +189,7 @@ func newExpDelayWithJitter(delay time.Duration) time.Duration {
 	return delay + time.Duration(float64(delay)*(rand.Float64()+0.5))
 }
 
-// Move task from taken list to delayed tree with score equal to next exp value
+// Delay sets new delay before task can be taken. If task was delayed
 func (q *Q) Delay(ctx context.Context, taskId string) error {
 	task, err := q.getTaskFromHeap(ctx, taskId)
 	if err != nil {
@@ -228,12 +233,12 @@ func (q *Q) Kick(ctx context.Context, taskId string) error {
 
 // Move all task ids from buried set to ready list
 func (q *Q) KickAll(ctx context.Context) error {
+	lock, err := q.locker.Obtain(lockKickAllInProgress(q.id), 10*time.Minute, nil)
+	if err != nil {
+		return errors.Wrap(err, "kick all: obtain lock")
+	}
+	defer lock.Release()
 	for {
-		lock, err := q.locker.Obtain(lockKickAllInProgress(q.id), 10*time.Minute, nil)
-		if err != nil {
-			return errors.Wrap(err, "kick all: obtain lock")
-		}
-		defer lock.Release()
 		taskId, err := q.client.SRandMember(keySetBuried(q.id)).Result()
 		if err != nil {
 			if err == redis.Nil {

@@ -44,7 +44,6 @@ func (q *Q) putTaskToHeap(ctx context.Context, task *Task) error {
 }
 
 func (q *Q) putTaskIdToDelayedTree(ctx context.Context, id string, delay time.Duration) error {
-	q.logger.Debug(ctx, float64(time.Now().Add(delay).Unix()))
 	if err := q.client.ZAdd(keyTreeDelayed(q.id), &redis.Z{
 		Score:  float64(time.Now().Add(delay).Unix()),
 		Member: id,

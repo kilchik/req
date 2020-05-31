@@ -294,6 +294,39 @@ func (suite *ReqOpsTestSuite) TestKick() {
 	suite.Equal(taskId, id)
 }
 
+func (suite *ReqOpsTestSuite) TestKickAll() {
+	for _, obj := range []string{
+		"abc", "def", "ghi",
+	} {
+		_, err := suite.q.Put(context.Background(), obj, 0)
+		suite.Require().Nil(err)
+
+		var dst string
+		taskId, err := suite.q.Take(context.Background(), &dst)
+		suite.Require().Nil(err)
+
+		err = suite.q.Bury(context.Background(), taskId)
+		suite.Require().Nil(err)
+	}
+
+	l, err := suite.redis.SCard("req_set_buried" + suite.q.GetId()).Result()
+	suite.Require().Nil(err)
+	suite.EqualValues(3, l)
+	l, err = suite.redis.LLen("req_list_ready" + suite.q.GetId()).Result()
+	suite.Require().Nil(err)
+	suite.EqualValues(0, l)
+
+	err = suite.q.KickAll(context.Background())
+	suite.Require().Nil(err)
+
+	l, err = suite.redis.SCard("req_set_buried" + suite.q.GetId()).Result()
+	suite.Require().Nil(err)
+	suite.EqualValues(0, l)
+	l, err = suite.redis.LLen("req_list_ready" + suite.q.GetId()).Result()
+	suite.Require().Nil(err)
+	suite.EqualValues(3, l)
+}
+
 func TestReqOpsTestSuite(t *testing.T) {
 	suite.Run(t, new(ReqOpsTestSuite))
 }
