@@ -182,23 +182,36 @@ func (q *Q) Delete(ctx context.Context, taskId string) error {
 	return nil
 }
 
-func newExpDelayWithJitter(delay time.Duration) time.Duration {
-	if delay == 0 {
-		return 1 * time.Second
+func newExpDelayWithJitter(delayCur, delayMin, delayMax time.Duration) time.Duration {
+	if delayCur == 0 {
+		return delayMin
 	}
-	return delay + time.Duration(float64(delay)*(rand.Float64()+0.5))
+	delayNext := delayCur + time.Duration(float64(delayCur)*(rand.Float64()+0.5))
+	if delayNext > delayMax {
+		return delayMax
+	}
+	return delayNext
 }
 
-// Delay sets new delay before task can be taken. If task was delayed
+// Delay sets new delay before task can be taken. If the task was delayed once then next delay period will be somewhat
+// twice longer but no longer than an hour. The delay is set to 1 second for the first time.
 func (q *Q) Delay(ctx context.Context, taskId string) error {
+	return q.DelayCustom(ctx, taskId, 1*time.Second, 1*time.Hour)
+}
+
+// Delay sets new custom delay in interval between "from" and "to" before task can be taken. If the task was delayed
+// once then next delay period will be somewhat twice longer but no longer than "to".
+func (q *Q) DelayCustom(ctx context.Context, taskId string, from, to time.Duration) error {
 	task, err := q.getTaskFromHeap(ctx, taskId)
 	if err != nil {
 		return errors.Wrapf(err, "get task by id %q", taskId)
 	}
-	task.Delay = newExpDelayWithJitter(task.Delay)
+	q.logger.Debugf(ctx, "task %q has delay %v", task.Delay)
+	task.Delay = newExpDelayWithJitter(task.Delay, from, to)
 	if err := q.putTaskToHeap(ctx, task); err != nil {
 		return errors.Wrap(err, "put task to heap")
 	}
+	q.logger.Debugf(ctx, "putting task %q with delay %v", task.Delay)
 	if err := q.putTaskIdToDelayedTree(ctx, taskId, task.Delay); err != nil {
 		return errors.Wrap(err, "put task id to delayed tree")
 	}

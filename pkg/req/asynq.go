@@ -9,6 +9,14 @@ import (
 
 type HandlerFunc func(ctx context.Context, taskId string, task interface{}) error
 
+type errorTempWithCustomDelay struct {
+	from, to time.Duration
+}
+
+func (e errorTempWithCustomDelay) Error() string {
+	return "custom temp error"
+}
+
 var (
 	errorFatal   = errors.New("fatal error")
 	errorTemp    = errors.New("temp error")
@@ -21,6 +29,10 @@ func NewErrorFatal(format string, args ...interface{}) error {
 
 func NewErrorTemp(format string, args ...interface{}) error {
 	return errors.Wrapf(errorTemp, format, args...)
+}
+
+func NewErrorTempWithCustomDelay(delayFrom, delayTo time.Duration, format string, args ...interface{}) error {
+	return errors.Wrapf(&errorTempWithCustomDelay{delayFrom, delayTo}, format, args...)
 }
 
 func NewErrorUnknown(format string, args ...interface{}) error {
@@ -65,9 +77,16 @@ func NewAsynQ(ctx context.Context, q *Q, task interface{}, handler HandlerFunc) 
 							q.logger.Errorf(ctx, "delay task: %v", err)
 						}
 					default:
-						q.logger.Errorf(ctx, "task handler failed with unexpected error: %v; delaying task %q", err, taskId)
-						if err := q.Delay(ctx, taskId); err != nil {
-							q.logger.Errorf(ctx, "delay task: %v", err)
+						if errTmpCustom, ok := errors.Cause(err).(*errorTempWithCustomDelay); ok {
+							q.logger.Infof(ctx, "task handler failed with custom temp error: %v; delaying task %q", err, taskId)
+							if err := q.DelayCustom(ctx, taskId, errTmpCustom.from, errTmpCustom.to); err != nil {
+								q.logger.Errorf(ctx, "delay task: %v", err)
+							}
+						} else {
+							q.logger.Errorf(ctx, "task handler failed with unexpected error: %v; delaying task %q", err, taskId)
+							if err := q.Delay(ctx, taskId); err != nil {
+								q.logger.Errorf(ctx, "delay task: %v", err)
+							}
 						}
 					}
 					continue

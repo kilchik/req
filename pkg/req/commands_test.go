@@ -221,17 +221,17 @@ func (suite *ReqOpsTestSuite) TestDelayTask() {
 
 	_, err = suite.q.Take(context.Background(), &dst)
 	suite.Require().Nil(err)
+	started := time.Now()
 	err = suite.q.Delay(context.Background(), taskId)
 	suite.Require().Nil(err)
 
-	started := time.Now()
 	_, err = suite.q.Take(context.Background(), taskId)
 	suite.Require().Nil(err)
 
 	// Check that elapsed time is [1.5, 2.5]s of delay + [0, 1]s of delayed tree traversal
 	elapsed := time.Now().Sub(started)
 	suite.True(time.Now().After(started.Add(3 * time.Second / 2)))
-	suite.True(time.Now().Before(started.Add(7 * time.Second / 2)))
+	suite.True(time.Now().Before(started.Add(7 * time.Second / 2 + 100 * time.Millisecond)))
 
 	err = suite.q.Delay(context.Background(), taskId)
 	suite.Require().Nil(err)
@@ -242,6 +242,36 @@ func (suite *ReqOpsTestSuite) TestDelayTask() {
 	t = &Task{}
 	suite.Require().Nil(json.Unmarshal([]byte(taskStr), t))
 	suite.True(t.Delay >= 3*elapsed/2 && t.Delay < 7*elapsed/2)
+}
+
+func (suite *ReqOpsTestSuite) TestDelayCustom() {
+	taskId, err := suite.q.Put(context.Background(), "abc", 0)
+	suite.Require().Nil(err)
+
+	var dst string
+	_, err = suite.q.Take(context.Background(), &dst)
+	suite.Require().Nil(err)
+
+	err = suite.q.DelayCustom(context.Background(), taskId, 2*time.Second, 3*time.Second)
+	suite.Require().Nil(err)
+
+	taskStr, err := suite.redis.Get(taskId).Result()
+	suite.Require().Nil(err)
+	t := &Task{}
+	suite.Require().Nil(json.Unmarshal([]byte(taskStr), t))
+	suite.EqualValues(2*time.Second, t.Delay)
+
+	_, err = suite.q.Take(context.Background(), &dst)
+	suite.Require().Nil(err)
+
+	err = suite.q.DelayCustom(context.Background(), taskId, 2*time.Second, 3*time.Second)
+	suite.Require().Nil(err)
+
+	taskStr, err = suite.redis.Get(taskId).Result()
+	suite.Require().Nil(err)
+	t = &Task{}
+	suite.Require().Nil(json.Unmarshal([]byte(taskStr), t))
+	suite.EqualValues(3*time.Second, t.Delay)
 }
 
 func (suite *ReqOpsTestSuite) TestBury() {
