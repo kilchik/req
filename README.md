@@ -1,3 +1,4 @@
+[![Go.Dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/kilchik/req/pkg/req?tab=doc)
 ![tests](https://github.com/kilchik/req/workflows/tests/badge.svg)
 [![codecov](https://codecov.io/gh/kilchik/req/branch/master/graph/badge.svg)](https://codecov.io/gh/kilchik/req)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kilchik/req)](https://goreportcard.com/report/github.com/kilchik/req)

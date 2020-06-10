@@ -44,6 +44,7 @@ type AsynQ struct {
 	handler HandlerFunc
 }
 
+// NewAsynQ creates and runs new queue using handler as a function for processing taken tasks
 func NewAsynQ(ctx context.Context, q *Q, task interface{}, handler HandlerFunc) *AsynQ {
 	delay := timeoutExp()
 	go func() {

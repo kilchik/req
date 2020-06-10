@@ -231,7 +231,7 @@ func (suite *ReqOpsTestSuite) TestDelayTask() {
 	// Check that elapsed time is [1.5, 2.5]s of delay + [0, 1]s of delayed tree traversal
 	elapsed := time.Now().Sub(started)
 	suite.True(time.Now().After(started.Add(3 * time.Second / 2)))
-	suite.True(time.Now().Before(started.Add(7 * time.Second / 2 + 100 * time.Millisecond)))
+	suite.True(time.Now().Before(started.Add(7*time.Second/2 + 100*time.Millisecond)))
 
 	err = suite.q.Delay(context.Background(), taskId)
 	suite.Require().Nil(err)
