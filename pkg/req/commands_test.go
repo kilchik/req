@@ -19,7 +19,7 @@ type ReqOpsTestSuite struct {
 
 func (suite *ReqOpsTestSuite) SetupTest() {
 	suite.fabriq = MustConnect(context.Background(), DisableLogger)
-	suite.q = suite.fabriq.MustCreate(context.Background())
+	suite.q = suite.fabriq.MustOpen(context.Background())
 	suite.redis = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "",
@@ -169,7 +169,7 @@ func (suite *ReqOpsTestSuite) TestDelete() {
 }
 
 func (suite *ReqOpsTestSuite) TestMultipleQueues() {
-	q2, err := suite.fabriq.Create(context.Background(), SetName("yet another queue"))
+	q2, err := suite.fabriq.Open(context.Background(), SetName("yet another queue"))
 	suite.Require().Nil(err)
 
 	taskIdQ1, err := suite.q.Put(context.Background(), "abc", 0)
@@ -230,7 +230,7 @@ func (suite *ReqOpsTestSuite) TestDelayTask() {
 
 	// Check that elapsed time is [1.5, 2.5]s of delay + [0, 1]s of delayed tree traversal
 	elapsed := time.Now().Sub(started)
-	suite.True(time.Now().After(started.Add(3 * time.Second / 2)))
+	suite.True(time.Now().After(started.Add(3*time.Second/2)), "elapsed: %v", elapsed)
 	suite.True(time.Now().Before(started.Add(7*time.Second/2 + 100*time.Millisecond)))
 
 	err = suite.q.Delay(context.Background(), taskId)
@@ -241,7 +241,8 @@ func (suite *ReqOpsTestSuite) TestDelayTask() {
 	suite.Require().Nil(err)
 	t = &Task{}
 	suite.Require().Nil(json.Unmarshal([]byte(taskStr), t))
-	suite.True(t.Delay >= 3*elapsed/2 && t.Delay < 7*elapsed/2)
+	suite.True(t.Delay >= 3*elapsed/2 && t.Delay < 7*elapsed/2,
+		"delay value: %v (expected %v <= delay < %v)", t.Delay, 3*elapsed/2, t.Delay < 7*elapsed/2)
 }
 
 func (suite *ReqOpsTestSuite) TestDelayCustom() {

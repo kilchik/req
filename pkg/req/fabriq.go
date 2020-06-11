@@ -39,7 +39,7 @@ func SetTakenValidationPeriod(period time.Duration) func(q *Q) error {
 	}
 }
 
-func (f *Fabriq) Create(ctx context.Context, options ...func(q *Q) error) (*Q, error) {
+func (f *Fabriq) Open(ctx context.Context, options ...func(q *Q) error) (*Q, error) {
 	q := &Q{
 		client:                f.client,
 		locker:                f.locker,
@@ -62,9 +62,9 @@ func (f *Fabriq) Create(ctx context.Context, options ...func(q *Q) error) (*Q, e
 	if err != nil && err != redis.Nil {
 		return nil, errors.Wrapf(err, "get id for queue %q", q.name)
 	}
-	if err != redis.Nil {
+	if err == redis.Nil {
 		q.id = generateQID()
-		if err := q.client.SetNX(q.name, keyQName(q.id), 0).Err(); err != nil {
+		if err := q.client.Set(q.name, q.id, 0).Err(); err != nil {
 			return nil, errors.Wrap(err, "SET queue name")
 		}
 	} else {
@@ -77,24 +77,24 @@ func (f *Fabriq) Create(ctx context.Context, options ...func(q *Q) error) (*Q, e
 	return q, nil
 }
 
-func (f *Fabriq) MustCreate(ctx context.Context, options ...func(q *Q) error) *Q {
-	q, err := f.Create(ctx, options...)
+func (f *Fabriq) MustOpen(ctx context.Context, options ...func(q *Q) error) *Q {
+	q, err := f.Open(ctx, options...)
 	if err != nil {
 		panic(err)
 	}
 	return q
 }
 
-func (f *Fabriq) CreateWithHandler(ctx context.Context, task interface{}, handler HandlerFunc, options ...func(q *Q) error) (*AsynQ, error) {
-	q, err := f.Create(ctx, options...)
+func (f *Fabriq) OpenWithHandler(ctx context.Context, task interface{}, handler HandlerFunc, options ...func(q *Q) error) (*AsynQ, error) {
+	q, err := f.Open(ctx, options...)
 	if err != nil {
 		return nil, errors.Wrap(err, "create queue")
 	}
 	return NewAsynQ(ctx, q, task, handler), nil
 }
 
-func (f *Fabriq) MustCreateWithHandler(ctx context.Context, task interface{}, handler HandlerFunc, options ...func(q *Q) error) *AsynQ {
-	aq, err := f.CreateWithHandler(ctx, task, handler)
+func (f *Fabriq) MustOpenWithHandler(ctx context.Context, task interface{}, handler HandlerFunc, options ...func(q *Q) error) *AsynQ {
+	aq, err := f.OpenWithHandler(ctx, task, handler)
 	if err != nil {
 		panic(err)
 	}

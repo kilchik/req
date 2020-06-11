@@ -17,7 +17,7 @@ type ValidateTakenTestSuite struct {
 
 func (suite *ValidateTakenTestSuite) SetupTest() {
 	suite.q = MustConnect(context.Background()).
-		MustCreate(context.Background(), SetTakeTimeout(1*time.Second), SetTakenValidationPeriod(1*time.Second))
+		MustOpen(context.Background(), SetTakeTimeout(1*time.Second), SetTakenValidationPeriod(1*time.Second))
 	suite.redis = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "",

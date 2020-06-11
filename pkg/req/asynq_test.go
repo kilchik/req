@@ -31,7 +31,7 @@ func (suite *AsynqTestSuite) TestHallelujahWithAsyncHandler() {
 	}
 	var res string
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	aq := suite.fabriq.MustCreateWithHandler(ctx, &concatTask{}, func(ctx context.Context, taskId string, task interface{}) error {
+	aq := suite.fabriq.MustOpenWithHandler(ctx, &concatTask{}, func(ctx context.Context, taskId string, task interface{}) error {
 		res += task.(*concatTask).NewLetter
 		return nil
 	})

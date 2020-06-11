@@ -16,10 +16,6 @@ func keySetBuried(qid string) string {
 	return "req_set_buried" + qid
 }
 
-func keyQName(qid string) string {
-	return "req_qname" + qid
-}
-
 func keyLastValidationTs(qid string) string {
 	return "req_last_validation" + qid
 }

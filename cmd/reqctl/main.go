@@ -58,7 +58,7 @@ func main() {
 		createOpts = append(createOpts, req.SetName(*qname))
 	}
 
-	q, err := fabriq.Create(ctx, createOpts...)
+	q, err := fabriq.Open(ctx, createOpts...)
 	if err != nil {
 		log.Fatalf("reqctl: create queue: %v", err)
 	}

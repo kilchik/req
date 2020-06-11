@@ -47,7 +47,7 @@ func main() {
 	ctx := context.Background()
 
 	f, _ := req.Connect(ctx)
-	asynq, _ := f.CreateWithHandler(ctx, &SumPositiveNumbersTask{}, handleSumPositiveNumbersTask, req.SetName("summer"))
+	asynq, _ := f.OpenWithHandler(ctx, &SumPositiveNumbersTask{}, handleSumPositiveNumbersTask, req.SetName("summer"))
 
 	if err := asynq.Put(ctx, SumPositiveNumbersTask{A: 40, B: 2}, time.Second); err != nil {
 		log.Fatalf("put new sum task: %v", err)

@@ -21,7 +21,7 @@ type SentinelTestSuite struct {
 
 func (suite *SentinelTestSuite) SetupTest() {
 	suite.fabriq = MustConnect(context.Background(), UseSentinel("mymaster", "", []string{"localhost:50000"}))
-	suite.q = suite.fabriq.MustCreate(context.Background())
+	suite.q = suite.fabriq.MustOpen(context.Background())
 	suite.redis = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "",
