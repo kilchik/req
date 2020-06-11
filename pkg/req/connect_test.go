@@ -2,6 +2,7 @@ package req
 
 import (
 	"context"
+	"testing"
 
 	"github.com/go-redis/redis/v7"
 	"github.com/stretchr/testify/suite"
@@ -35,4 +36,8 @@ func (suite *ConnectTestSuite) TestReconnectToExistingQueue() {
 	suite.Require().Nil(err)
 	suite.Require().EqualValues(taskId, taskId2)
 	suite.Require().EqualValues("abc", taken)
+}
+
+func TestConnectTestSuite(t *testing.T) {
+	suite.Run(t, new(ConnectTestSuite))
 }
