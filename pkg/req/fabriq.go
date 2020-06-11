@@ -41,7 +41,6 @@ func SetTakenValidationPeriod(period time.Duration) func(q *Q) error {
 
 func (f *Fabriq) Create(ctx context.Context, options ...func(q *Q) error) (*Q, error) {
 	q := &Q{
-		id:                    generateQID(),
 		client:                f.client,
 		locker:                f.locker,
 		logger:                f.logger,
@@ -56,11 +55,20 @@ func (f *Fabriq) Create(ctx context.Context, options ...func(q *Q) error) (*Q, e
 	}
 
 	// Map id to name if present
-	if q.name != "" {
+	if q.name == "" {
 		q.name = "default"
-		if err := q.client.SetNX(keyQName(q.id), q.name, 0).Err(); err != nil {
+	}
+	qid, err := q.client.Get(q.name).Result()
+	if err != nil && err != redis.Nil {
+		return nil, errors.Wrapf(err, "get id for queue %q", q.name)
+	}
+	if err != redis.Nil {
+		q.id = generateQID()
+		if err := q.client.SetNX(q.name, keyQName(q.id), 0).Err(); err != nil {
 			return nil, errors.Wrap(err, "SET queue name")
 		}
+	} else {
+		q.id = qid
 	}
 
 	go q.traverseDelayed(ctx)
