@@ -33,7 +33,7 @@ jobs:
         redis-version: 5
 
     - name: Test
-      run: go test -race -coverprofile=coverage.txt -v ./...
+      run: go test -race -count=1 -coverprofile=coverage.txt -v ./...
 
     - name: Upload coverage to Codecov
       if: ${{ always() }}
