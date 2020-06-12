@@ -54,8 +54,8 @@ func (q *Q) traverseDelayed(ctx context.Context) {
 				time.Sleep(retryTimeout())
 				continue
 			}
-			if err := q.client.ZPopMin(keyTreeDelayed(q.id), 1).Err(); err != nil {
-				q.logger.Errorf(ctx, "traverse delayed: ZPOPMIN: %v", err)
+			if err := q.client.ZRem(keyTreeDelayed(q.id), res[0].Member.(string)).Err(); err != nil {
+				q.logger.Errorf(ctx, "traverse delayed: ZRem: %v", err)
 				lock.Release()
 				time.Sleep(retryTimeout())
 				continue
