@@ -38,6 +38,7 @@ func SetRedis(addr, password string) func(f *Fabriq) error {
 			Addr:     addr,
 			Password: password,
 		})
+		f.locker = redislock.New(f.client)
 		return nil
 	}
 }
@@ -53,6 +54,7 @@ func UseSentinel(masterName, password string, sentinelAddrs []string) func(f *Fa
 			SentinelAddrs: sentinelAddrs,
 			Password:      password,
 		})
+		f.locker = redislock.New(f.client)
 		return nil
 	}
 }
