@@ -1,4 +1,4 @@
-package req
+package integration_tests
 
 import (
 	"context"
@@ -6,18 +6,20 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v7"
+	"github.com/kilchik/req/pkg/fabriq"
+	"github.com/kilchik/req/pkg/req"
 	"github.com/stretchr/testify/suite"
 )
 
 type ValidateTakenTestSuite struct {
 	suite.Suite
-	q     *Q
+	q     *req.Q
 	redis *redis.Client
 }
 
 func (suite *ValidateTakenTestSuite) SetupTest() {
-	suite.q = MustConnect(context.Background()).
-		MustOpen(context.Background(), SetTakeTimeout(1*time.Second), SetTakenValidationPeriod(1*time.Second))
+	suite.q = fabriq.MustConnect(context.Background()).
+		MustOpen(context.Background(), req.SetTakeTimeout(1*time.Second), req.SetTakenValidationPeriod(1*time.Second))
 	suite.redis = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "",

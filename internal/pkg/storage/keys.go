@@ -1,4 +1,4 @@
-package req
+package storage
 
 func keyListReady(qid string) string {
 	return "req_list_ready" + qid

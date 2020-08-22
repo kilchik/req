@@ -3,21 +3,16 @@ package req
 import (
 	"time"
 
-	"github.com/bsm/redislock"
-	"github.com/go-redis/redis/v7"
-)
-
-const (
-	defaultTakenValidationPeriod = 15 * time.Minute
-	defaultTakeTimeout           = 30 * time.Minute
+	"github.com/kilchik/req/internal/pkg/storage"
+	"github.com/kilchik/req/pkg/logger"
 )
 
 type Q struct {
-	id     string
-	name   string
-	client *redis.Client
-	locker *redislock.Client
-	logger Logger
+	id   string
+	name string
+
+	store  storage.Storage
+	logger logger.Logger
 
 	takeTimeout           time.Duration
 	takenValidationPeriod time.Duration

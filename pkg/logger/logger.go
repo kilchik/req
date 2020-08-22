@@ -1,4 +1,4 @@
-package req
+package logger
 
 import (
 	"context"
@@ -16,43 +16,47 @@ type Logger interface {
 	Debugf(ctx context.Context, format string, args ...interface{})
 }
 
-type defaultLogger struct {
+type DefaultLogger struct {
 	disabled bool
 }
 
-func (l *defaultLogger) Error(ctx context.Context, args ...interface{}) {
+func (l *DefaultLogger) Disable() {
+	l.disabled = true
+}
+
+func (l *DefaultLogger) Error(ctx context.Context, args ...interface{}) {
 	l.printArgs(ctx, "[E]", args...)
 }
 
-func (l *defaultLogger) Errorf(ctx context.Context, format string, args ...interface{}) {
+func (l *DefaultLogger) Errorf(ctx context.Context, format string, args ...interface{}) {
 	l.printFormatAndArgs(ctx, "[E]", format, args...)
 }
 
-func (l *defaultLogger) Info(ctx context.Context, args ...interface{}) {
+func (l *DefaultLogger) Info(ctx context.Context, args ...interface{}) {
 	l.printArgs(ctx, "[I]", args...)
 }
 
-func (l *defaultLogger) Infof(ctx context.Context, format string, args ...interface{}) {
+func (l *DefaultLogger) Infof(ctx context.Context, format string, args ...interface{}) {
 	l.printFormatAndArgs(ctx, "[I]", format, args...)
 }
 
-func (l *defaultLogger) Warn(ctx context.Context, args ...interface{}) {
+func (l *DefaultLogger) Warn(ctx context.Context, args ...interface{}) {
 	l.printArgs(ctx, "[W]", args...)
 }
 
-func (l *defaultLogger) Warnf(ctx context.Context, format string, args ...interface{}) {
+func (l *DefaultLogger) Warnf(ctx context.Context, format string, args ...interface{}) {
 	l.printFormatAndArgs(ctx, "[W]", format, args...)
 }
 
-func (l *defaultLogger) Debug(ctx context.Context, args ...interface{}) {
+func (l *DefaultLogger) Debug(ctx context.Context, args ...interface{}) {
 	l.printArgs(ctx, "[D]", args...)
 }
 
-func (l *defaultLogger) Debugf(ctx context.Context, format string, args ...interface{}) {
+func (l *DefaultLogger) Debugf(ctx context.Context, format string, args ...interface{}) {
 	l.printFormatAndArgs(ctx, "[D]", format, args...)
 }
 
-func (l *defaultLogger) printArgs(ctx context.Context, prefix string, args ...interface{}) {
+func (l *DefaultLogger) printArgs(ctx context.Context, prefix string, args ...interface{}) {
 	if l.disabled {
 		return
 	}
@@ -60,7 +64,7 @@ func (l *defaultLogger) printArgs(ctx context.Context, prefix string, args ...in
 	log.Print(args...)
 }
 
-func (l *defaultLogger) printFormatAndArgs(ctx context.Context, prefix, format string, args ...interface{}) {
+func (l *DefaultLogger) printFormatAndArgs(ctx context.Context, prefix, format string, args ...interface{}) {
 	if l.disabled {
 		return
 	}

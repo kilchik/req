@@ -1,6 +1,6 @@
 // +build sentinel
 
-package req
+package integration_tests
 
 import (
 	"context"
@@ -9,18 +9,21 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v7"
+	"github.com/kilchik/req/pkg/fabriq"
+	"github.com/kilchik/req/pkg/req"
+	"github.com/kilchik/req/pkg/types"
 	"github.com/stretchr/testify/suite"
 )
 
 type SentinelTestSuite struct {
 	suite.Suite
-	fabriq *Fabriq
-	q      *Q
+	fabriq *fabriq.Fabriq
+	q      *req.Q
 	redis  *redis.Client
 }
 
 func (suite *SentinelTestSuite) SetupTest() {
-	suite.fabriq = MustConnect(context.Background(), UseSentinel("mymaster", "", []string{"localhost:50000"}))
+	suite.fabriq = fabriq.MustConnect(context.Background(), fabriq.UseSentinel("mymaster", "", []string{"localhost:50000"}))
 	suite.q = suite.fabriq.MustOpen(context.Background())
 	suite.redis = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
@@ -38,7 +41,7 @@ func (suite *SentinelTestSuite) TestCommands() {
 		taskStr, err := suite.redis.Get(taskId).Result()
 		suite.Require().Nil(err)
 
-		t := &Task{}
+		t := &types.Task{}
 		err = json.Unmarshal([]byte(taskStr), t)
 		suite.Require().Nil(err)
 		suite.Equal(taskId, t.Id)
@@ -62,7 +65,7 @@ func (suite *SentinelTestSuite) TestCommands() {
 
 	suite.Run("take", func() {
 		payload, _ := json.Marshal("abc")
-		t, _ := json.Marshal(&Task{
+		t, _ := json.Marshal(&types.Task{
 			Id:    "task_uuid",
 			Delay: 0,
 			Body:  payload,

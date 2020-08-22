@@ -1,4 +1,4 @@
-package req
+package integration_tests
 
 import (
 	"context"
@@ -7,18 +7,21 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v7"
+	"github.com/kilchik/req/pkg/fabriq"
+	"github.com/kilchik/req/pkg/req"
+	"github.com/kilchik/req/pkg/types"
 	"github.com/stretchr/testify/suite"
 )
 
 type ReqOpsTestSuite struct {
 	suite.Suite
-	fabriq *Fabriq
-	q      *Q
+	fabriq *fabriq.Fabriq
+	q      *req.Q
 	redis  *redis.Client
 }
 
 func (suite *ReqOpsTestSuite) SetupTest() {
-	suite.fabriq = MustConnect(context.Background(), DisableLogger)
+	suite.fabriq = fabriq.MustConnect(context.Background(), fabriq.DisableLogger)
 	suite.q = suite.fabriq.MustOpen(context.Background())
 	suite.redis = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
@@ -35,7 +38,7 @@ func (suite *ReqOpsTestSuite) TestPutWithZeroDelay() {
 	taskStr, err := suite.redis.Get(taskId).Result()
 	suite.Require().Nil(err)
 
-	t := &Task{}
+	t := &types.Task{}
 	err = json.Unmarshal([]byte(taskStr), t)
 	suite.Require().Nil(err)
 	suite.Equal(taskId, t.Id)
@@ -87,7 +90,7 @@ func (suite *ReqOpsTestSuite) TestPutWithNonZeroDelay() {
 
 func (suite *ReqOpsTestSuite) TestTake() {
 	payload, _ := json.Marshal("abc")
-	t, _ := json.Marshal(&Task{
+	t, _ := json.Marshal(&types.Task{
 		Id:    "task_uuid",
 		Delay: 0,
 		Body:  payload,
@@ -169,7 +172,7 @@ func (suite *ReqOpsTestSuite) TestDelete() {
 }
 
 func (suite *ReqOpsTestSuite) TestMultipleQueues() {
-	q2, err := suite.fabriq.Open(context.Background(), SetName("yet another queue"))
+	q2, err := suite.fabriq.Open(context.Background(), req.SetName("yet another queue"))
 	suite.Require().Nil(err)
 
 	taskIdQ1, err := suite.q.Put(context.Background(), "abc", 0)
@@ -215,7 +218,7 @@ func (suite *ReqOpsTestSuite) TestDelayTask() {
 	// Check that task in heap has delay equal to 1 second
 	taskStr, err := suite.redis.Get(taskId).Result()
 	suite.Require().Nil(err)
-	t := &Task{}
+	t := &types.Task{}
 	suite.Require().Nil(json.Unmarshal([]byte(taskStr), t))
 	suite.Equal(1*time.Second, t.Delay)
 
@@ -239,7 +242,7 @@ func (suite *ReqOpsTestSuite) TestDelayTask() {
 	// Check that task in heap has new delay between [1.5, 2.5) * prev delay + [0, 1]s of delayed tree traversal
 	taskStr, err = suite.redis.Get(taskId).Result()
 	suite.Require().Nil(err)
-	t = &Task{}
+	t = &types.Task{}
 	suite.Require().Nil(json.Unmarshal([]byte(taskStr), t))
 	suite.True(t.Delay >= 3*elapsed/2 && t.Delay < 7*elapsed/2,
 		"delay value: %v (expected %v <= delay < %v)", t.Delay, 3*elapsed/2, t.Delay < 7*elapsed/2)
@@ -258,7 +261,7 @@ func (suite *ReqOpsTestSuite) TestDelayCustom() {
 
 	taskStr, err := suite.redis.Get(taskId).Result()
 	suite.Require().Nil(err)
-	t := &Task{}
+	t := &types.Task{}
 	suite.Require().Nil(json.Unmarshal([]byte(taskStr), t))
 	suite.EqualValues(2*time.Second, t.Delay)
 
@@ -270,7 +273,7 @@ func (suite *ReqOpsTestSuite) TestDelayCustom() {
 
 	taskStr, err = suite.redis.Get(taskId).Result()
 	suite.Require().Nil(err)
-	t = &Task{}
+	t = &types.Task{}
 	suite.Require().Nil(json.Unmarshal([]byte(taskStr), t))
 	suite.EqualValues(3*time.Second, t.Delay)
 }

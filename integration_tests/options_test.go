@@ -1,4 +1,4 @@
-package req
+package integration_tests
 
 import (
 	"context"
@@ -6,13 +6,15 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v7"
+	"github.com/kilchik/req/pkg/fabriq"
+	"github.com/kilchik/req/pkg/req"
 	"github.com/stretchr/testify/suite"
 )
 
 type ConnectTestSuite struct {
 	suite.Suite
-	fabriq *Fabriq
-	q      *Q
+	fabriq *fabriq.Fabriq
+	q      *req.Q
 	redis  *redis.Client
 }
 
@@ -23,16 +25,16 @@ func (suite *ConnectTestSuite) SetupTest() {
 		DB:       0,
 	})
 	suite.redis.FlushAll()
-	suite.fabriq = MustConnect(context.Background(), DisableLogger)
-	suite.q = suite.fabriq.MustOpen(context.Background(), SetName("myqueue"))
+	suite.fabriq = fabriq.MustConnect(context.Background(), fabriq.DisableLogger)
+	suite.q = suite.fabriq.MustOpen(context.Background(), req.SetName("myqueue"))
 }
 
 func (suite *ConnectTestSuite) TestReconnectToExistingQueue() {
 	taskId, err := suite.q.Put(context.Background(), "abc", 0)
 	suite.Require().Nil(err)
 
-	fabriq := MustConnect(context.Background(), DisableLogger)
-	qSame := fabriq.MustOpen(context.Background(), SetName("myqueue"))
+	fabriq := fabriq.MustConnect(context.Background(), fabriq.DisableLogger)
+	qSame := fabriq.MustOpen(context.Background(), req.SetName("myqueue"))
 
 	qid, err := suite.redis.Get("myqueue").Result()
 	suite.Require().Nil(err)

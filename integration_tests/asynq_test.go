@@ -1,4 +1,4 @@
-package req
+package integration_tests
 
 import (
 	"context"
@@ -6,17 +6,18 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v7"
+	"github.com/kilchik/req/pkg/fabriq"
 	"github.com/stretchr/testify/suite"
 )
 
 type AsynqTestSuite struct {
 	suite.Suite
-	fabriq *Fabriq
+	fabriq *fabriq.Fabriq
 	redis  *redis.Client
 }
 
 func (suite *AsynqTestSuite) SetupTest() {
-	suite.fabriq = MustConnect(context.Background(), DisableLogger)
+	suite.fabriq = fabriq.MustConnect(context.Background())
 	suite.redis = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "",
@@ -44,6 +45,7 @@ func (suite *AsynqTestSuite) TestHallelujahWithAsyncHandler() {
 	cancel()
 	time.Sleep(500 * time.Millisecond)
 	suite.Equal("Hallelujah", res)
+	time.Sleep(1 * time.Second)
 }
 
 func TestAsynqTestSuite(t *testing.T) {

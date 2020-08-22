@@ -28,7 +28,7 @@ jobs:
         go get -v -t -d ./...
 
     - name: Start Redis
-      uses: supercharge/redis-github-action@1.1.0
+      uses: supercharge/storage-github-action@1.1.0
       with:
         redis-version: 4
 

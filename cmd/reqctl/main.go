@@ -13,12 +13,13 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/google/uuid"
+	"github.com/kilchik/req/pkg/fabriq"
 	"github.com/kilchik/req/pkg/req"
 )
 
 func main() {
-	host := flag.String("host", "localhost:6379", "Specify redis host")
-	passwd := flag.String("password", "", "Specify redis password")
+	host := flag.String("host", "localhost:6379", "Specify storage host")
+	passwd := flag.String("password", "", "Specify storage password")
 	qname := flag.String("qname", "default", "Specify queue name")
 	sentinels := flag.String("sentinels", "", "Specify sentinels list using ; as separator")
 	masterName := flag.String("master", "", "Specify sentinel master name")
@@ -39,18 +40,18 @@ func main() {
 		}
 	}
 
-	connectOpts := []func(f *req.Fabriq) error{req.DisableLogger}
+	connectOpts := []func(f *fabriq.Fabriq) error{fabriq.DisableLogger}
 	if *sentinels != "" {
 		sentinelsArr := strings.Split(*sentinels, ";")
-		connectOpts = append(connectOpts, req.UseSentinel(*masterName, *passwd, sentinelsArr))
+		connectOpts = append(connectOpts, fabriq.UseSentinel(*masterName, *passwd, sentinelsArr))
 	} else if *host != "" {
-		connectOpts = append(connectOpts, req.SetRedis(*host, *passwd))
+		connectOpts = append(connectOpts, fabriq.SetRedis(*host, *passwd))
 	}
 
 	ctx := context.Background()
-	fabriq, err := req.Connect(ctx, connectOpts...)
+	fabriq, err := fabriq.Connect(ctx, connectOpts...)
 	if err != nil {
-		log.Fatalf("reqctl: connect to redis: %v", err)
+		log.Fatalf("reqctl: connect to storage: %v", err)
 	}
 
 	var createOpts []func(q *req.Q) error

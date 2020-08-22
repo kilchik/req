@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/kilchik/req/pkg/fabriq"
 	"github.com/kilchik/req/pkg/req"
 )
 
@@ -46,7 +47,7 @@ func handleSumPositiveNumbersTask(ctx context.Context, taskId string, taskIface 
 func main() {
 	ctx := context.Background()
 
-	f, _ := req.Connect(ctx)
+	f, _ := fabriq.Connect(ctx)
 	asynq, _ := f.OpenWithHandler(ctx, &SumPositiveNumbersTask{}, handleSumPositiveNumbersTask, req.SetName("summer"))
 
 	if err := asynq.Put(ctx, SumPositiveNumbersTask{A: 40, B: 2}, time.Second); err != nil {

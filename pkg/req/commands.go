@@ -3,13 +3,12 @@ package req
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math/rand"
-	"strconv"
 	"time"
 
-	"github.com/go-redis/redis/v7"
 	"github.com/google/uuid"
+	"github.com/kilchik/req/internal/pkg/storage"
+	"github.com/kilchik/req/pkg/types"
 	"github.com/pkg/errors"
 )
 
@@ -24,26 +23,25 @@ func (q *Q) Put(ctx context.Context, obj interface{}, delay time.Duration) (task
 	// Gen unique task id
 	taskId = uuid.New().String()
 
-	task := &Task{
+	task := &types.Task{
 		Id:    taskId,
 		Delay: delay,
 		Body:  payload,
 	}
 
-	if err := q.putTaskToHeap(ctx, task); err != nil {
+	if err := q.store.PutTaskToHeap(ctx, task); err != nil {
 		return "", errors.Wrap(err, "put task to heap")
 	}
 	q.logger.Debugf(ctx, "successfully put task %q to kv storage", taskId)
 
 	if delay > 0 {
-		if err := q.putTaskIdToDelayedTree(ctx, taskId, delay); err != nil {
+		if err := q.store.PutTaskIdToDelayedTree(ctx, q.id, taskId, delay); err != nil {
 			return "", errors.Wrap(err, "put task id to delayed tree")
 		}
 	} else {
 		// Lpush task id to ready list
-		if err := q.client.LPush(keyListReady(q.id), taskId).Err(); err != nil {
-			// TODO: handle error
-			return "", errors.Wrap(err, "put: LPUSH")
+		if err := q.store.PutTaskIdToReadyList(ctx, q.id, taskId); err != nil {
+			return "", errors.Wrap(err, "put task id to ready list")
 		}
 		q.logger.Debugf(ctx, "successfully put task %q to ready list", taskId)
 	}
@@ -51,18 +49,10 @@ func (q *Q) Put(ctx context.Context, obj interface{}, delay time.Duration) (task
 	return taskId, nil
 }
 
-func timeoutExp() func() time.Duration {
-	timeout := time.Second
-	return func() time.Duration {
-		timeout *= 2
-		return timeout
-	}
-}
-
 // Take returns next task from queue in FIFO order. If queue is empty the call will be blocked until any task is put
 // into queue or context is canceled. The task will not be automatically removed or acknowledged by this action.
 func (q *Q) Take(ctx context.Context, obj interface{}) (id string, err error) {
-	retryTimeout := timeoutExp()
+	const checkPeriod = 1 * time.Second
 	for {
 		select {
 		case <-ctx.Done():
@@ -71,30 +61,24 @@ func (q *Q) Take(ctx context.Context, obj interface{}) (id string, err error) {
 		}
 
 		// Transfer task id from ready list to taken list
-		taskId, err := q.client.BRPopLPush(keyListReady(q.id), keyListTaken(q.id), 1*time.Second).Result()
+		taskId, err := q.store.MoveTaskIdFromReadyListToTaken(ctx, q.id)
 		if err != nil {
-			// If timeout
-			if err == redis.Nil {
+			if errors.Cause(err) == storage.ErrorNotFound {
+				time.Sleep(checkPeriod)
 				continue
 			}
-
-			time.Sleep(retryTimeout())
-			continue
+			return "", errors.Wrap(err, "move task id from ready list to taken")
 		}
 		q.logger.Debugf(ctx, "successfully got task id %q from ready list", taskId)
 
-		task, err := q.getTaskFromHeap(ctx, taskId)
+		task, err := q.store.GetTaskFromHeap(ctx, taskId)
 		if err != nil {
 			return "", errors.Wrap(err, "get task by id")
-		}
-		if task.Id != taskId {
-			// TODO: handle
-			return "", errors.New("smth bad happened")
 		}
 
 		// Set time when task was taken
 		task.TakenAt = time.Now()
-		if err := q.putTaskToHeap(ctx, task); err != nil {
+		if err := q.store.PutTaskToHeap(ctx, task); err != nil {
 			return "", errors.Wrap(err, "put task to heap")
 		}
 
@@ -102,7 +86,6 @@ func (q *Q) Take(ctx context.Context, obj interface{}) (id string, err error) {
 		if err := json.Unmarshal(task.Body, &obj); err != nil {
 			return "", errors.Wrap(err, "decode task body")
 		}
-		q.logger.Debugf(ctx, "successfully decoded task body")
 
 		return taskId, nil
 	}
@@ -110,18 +93,16 @@ func (q *Q) Take(ctx context.Context, obj interface{}) (id string, err error) {
 
 // Ack acknowledges task completion.
 func (q *Q) Ack(ctx context.Context, id string) error {
-	if err := q.client.LRem(keyListTaken(q.id), -1, id).Err(); err != nil {
-		// TODO: retry error
-		return errors.Wrap(err, "ack: LREM")
+	if err := q.store.DropTaskIdFromTakenList(ctx, q.id, id); err != nil {
+		return errors.Wrap(err, "drop task id from taken list")
 	}
 
-	if err := q.client.Incr(keyCounterDone(q.id)).Err(); err != nil {
-		q.logger.Errorf(ctx, "ack: INCR done counter: %v", err)
+	if err := q.store.IncrementDoneCounter(ctx, q.id); err != nil {
+		return errors.Wrap(err, "increment done counter")
 	}
 
-	if err := q.client.Del(id).Err(); err != nil {
-		// TODO retry error
-		return errors.Wrap(err, "ack: DEL")
+	if err := q.store.DropTaskFromHeap(ctx, id); err != nil {
+		return errors.Wrap(err, "drop task body")
 	}
 
 	return nil
@@ -135,49 +116,36 @@ type Stat struct {
 func (q *Q) Stat(ctx context.Context) (*Stat, error) {
 	res := &Stat{}
 	var err error
-	res.Ready, err = q.client.LLen(keyListReady(q.id)).Result()
+	res.Ready, err = q.store.GetReadyListLen(ctx, q.id)
 	if err != nil {
-		return nil, errors.Wrap(err, "stat: LLEN ready")
+		return nil, errors.Wrap(err, "get ready list size")
 	}
-	res.Taken, err = q.client.LLen(keyListTaken(q.id)).Result()
+	res.Taken, err = q.store.GetTakenListLen(ctx, q.id)
 	if err != nil {
-		return nil, errors.Wrap(err, "stat: LLEN taken")
+		return nil, errors.Wrap(err, "get taken list size")
 	}
-	res.Delayed, err = q.client.ZCount(keyTreeDelayed(q.id), "-inf", "+inf").Result()
+	res.Delayed, err = q.store.GetDelayedTreeSize(ctx, q.id)
 	if err != nil {
-		return nil, errors.Wrap(err, "stat: ZCOUNT delayed")
+		return nil, errors.Wrap(err, "get delayed tree size")
 	}
-	var doneStr string
-	doneStr, err = q.client.Get(keyCounterDone(q.id)).Result()
+	res.Done, err = q.store.GetDoneCounterValue(ctx, q.id)
 	if err != nil {
-		if err != redis.Nil {
-			return nil, errors.Wrap(err, "stat: GET done")
-		}
-		res.Done = 0
-	} else {
-		res.Done, err = strconv.ParseInt(doneStr, 10, 64)
-		if err != nil {
-			return nil, errors.Wrap(err, "stat: parse done string")
-		}
+		return nil, errors.Wrap(err, "get done counter value")
 	}
-	res.Buried, err = q.client.SCard(keySetBuried(q.id)).Result()
+	res.Buried, err = q.store.GetBuriedSetSize(ctx, q.id)
 	if err != nil {
-		return nil, errors.Wrap(err, "stat: SCARD buried")
+		return nil, errors.Wrap(err, "get buried set size")
 	}
 	return res, nil
 }
 
 // Delete removes task from queue if it is currently taken.
-func (q *Q) Delete(ctx context.Context, taskId string) error {
-	deleted, err := q.client.LRem(keyListTaken(q.id), 1, taskId).Result()
-	if err != nil {
-		return errors.Wrapf(err, "delete: LREM %q from taken list: %v", taskId, err)
+func (q *Q) Delete(ctx context.Context, id string) error {
+	if err := q.store.DropTaskIdFromTakenList(ctx, q.id, id); err != nil {
+		return errors.Wrap(err, "drop task id from taken list")
 	}
-	if deleted != 1 {
-		return errors.New(fmt.Sprintf("delete: no task with id %q found", taskId))
-	}
-	if err := q.client.Del(taskId).Err(); err != nil {
-		return errors.Wrapf(err, "delete: DEL %q", taskId)
+	if err := q.store.DropTaskFromHeap(ctx, id); err != nil {
+		return errors.Wrapf(err, "drop task body")
 	}
 	return nil
 }
@@ -201,66 +169,84 @@ func (q *Q) Delay(ctx context.Context, taskId string) error {
 
 // Delay sets new custom delay in interval between "from" and "to" before task can be taken. If the task was delayed
 // once then next delay period will be somewhat twice longer but no longer than "to".
-func (q *Q) DelayCustom(ctx context.Context, taskId string, from, to time.Duration) error {
-	task, err := q.getTaskFromHeap(ctx, taskId)
+func (q *Q) DelayCustom(ctx context.Context, id string, from, to time.Duration) error {
+	task, err := q.store.GetTaskFromHeap(ctx, id)
 	if err != nil {
-		return errors.Wrapf(err, "get task by id %q", taskId)
+		return errors.Wrapf(err, "get task by id %q", id)
 	}
 	q.logger.Debugf(ctx, "task %q has delay %v", task.Delay)
 	task.Delay = newExpDelayWithJitter(task.Delay, from, to)
-	if err := q.putTaskToHeap(ctx, task); err != nil {
+	if err := q.store.PutTaskToHeap(ctx, task); err != nil {
 		return errors.Wrap(err, "put task to heap")
 	}
 	q.logger.Debugf(ctx, "putting task %q with delay %v", task.Delay)
-	if err := q.putTaskIdToDelayedTree(ctx, taskId, task.Delay); err != nil {
+	if err := q.store.PutTaskIdToDelayedTree(ctx, q.id, id, task.Delay); err != nil {
 		return errors.Wrap(err, "put task id to delayed tree")
 	}
-	if err := q.client.LRem(keyListTaken(q.id), -1, taskId).Err(); err != nil {
-		// TODO: retry error
-		return errors.Wrap(err, "delay: LREM")
+	if err := q.store.DropTaskIdFromTakenList(ctx, q.id, id); err != nil {
+		return errors.Wrap(err, "drop task id from taken list")
 	}
+
 	return nil
 }
 
 // Move task id from taken list to buried set
-func (q *Q) Bury(ctx context.Context, taskId string) error {
-	if err := q.client.SAdd(keySetBuried(q.id), taskId).Err(); err != nil {
-		return errors.Wrap(err, "bury: SADD to buried set")
+func (q *Q) Bury(ctx context.Context, id string) error {
+	if err := q.store.PutTaskIdToBuriedSet(ctx, q.id, id); err != nil {
+		return errors.Wrap(err, "put task id to buried set")
 	}
-	if err := q.client.LRem(keyListTaken(q.id), 1, taskId).Err(); err != nil {
-		return errors.Wrap(err, "bury: LREM from taken list")
+	if err := q.store.DropTaskIdFromTakenList(ctx, q.id, id); err != nil {
+		return errors.Wrap(err, "drop task id from taken list")
 	}
 	return nil
 }
 
 // Move task id from buried set to ready list
 func (q *Q) Kick(ctx context.Context, taskId string) error {
-	if err := q.client.LPush(keyListReady(q.id), taskId).Err(); err != nil {
-		return errors.Wrap(err, "kick: LPUSH task id to ready list")
+	if err := q.store.PutTaskIdToReadyList(ctx, q.id, taskId); err != nil {
+		return errors.Wrap(err, "put task id to ready list")
 	}
-	if err := q.client.SRem(keySetBuried(q.id), taskId).Err(); err != nil {
-		return errors.Wrap(err, "kick: SREM task id from buried set")
+	if err := q.store.DropTaskIdFromBuriedSet(ctx, q.id, taskId); err != nil {
+		return errors.Wrap(err, "drop task id from buried set")
 	}
 	return nil
 }
 
 // Move all task ids from buried set to ready list
 func (q *Q) KickAll(ctx context.Context) error {
-	lock, err := q.locker.Obtain(lockKickAllInProgress(q.id), 10*time.Minute, nil)
-	if err != nil {
-		return errors.Wrap(err, "kick all: obtain lock")
-	}
-	defer lock.Release()
+	var releaseLock func() error
 	for {
-		taskId, err := q.client.SRandMember(keySetBuried(q.id)).Result()
+		var err error
+		releaseLock, err = q.store.TryLockBeforeKick(ctx, q.id, 1*time.Minute)
+		if err == nil {
+			break
+		}
+		if err == storage.ErrorLocked {
+			// If another pod is already kicking tasks
+			time.Sleep(1 * time.Second)
+		} else {
+			return errors.Wrap(err, "kick all: obtain lock")
+		}
+	}
+
+	defer func() {
+		if releaseLock != nil {
+			if err := releaseLock(); err != nil {
+				q.logger.Errorf(ctx, "kick all: release lock: %v", err)
+			}
+		}
+	}()
+
+	for {
+		taskId, err := q.store.GetRandomBuriedTaskId(ctx, q.id)
 		if err != nil {
-			if err == redis.Nil {
+			if errors.Cause(err) == storage.ErrorNotFound {
 				break
 			}
-			return errors.Wrap(err, "kick all: SRANDMEMBER")
+			return errors.Wrap(err, "get random task id from buried set")
 		}
 		if err := q.Kick(ctx, taskId); err != nil {
-			return errors.Wrapf(err, "kick all: kick %q", taskId)
+			return errors.Wrapf(err, "kick %q", taskId)
 		}
 	}
 	return nil
