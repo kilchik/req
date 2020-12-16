@@ -3,6 +3,7 @@ package req
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -150,6 +151,17 @@ func (q *Q) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteBuried removes task from buried set.
+func (q *Q) DeleteBuried(ctx context.Context, id string) error {
+	if err := q.store.DropTaskIdFromBuriedSet(ctx, q.id, id); err != nil {
+		return errors.Wrap(err, "drop task id from buried set")
+	}
+	if err := q.store.DropTaskFromHeap(ctx, id); err != nil {
+		return errors.Wrapf(err, "drop task body")
+	}
+	return nil
+}
+
 func newExpDelayWithJitter(delayCur, delayMin, delayMax time.Duration) time.Duration {
 	if delayCur == 0 {
 		return delayMin
@@ -250,4 +262,83 @@ func (q *Q) KickAll(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (q *Q) Top(ctx context.Context, state TaskState, size int64) ([]string, error) {
+	switch state {
+	case StateDelayed:
+		return q.store.GetDelayedSlice(ctx, q.id, size)
+	case StateReady:
+		return q.store.GetReadySlice(ctx, q.id, size)
+	case StateTaken:
+		return q.store.GetTakenSlice(ctx, q.id, size)
+	case StateBuried:
+		return q.store.GetBuriedSlice(ctx, q.id, size)
+	default:
+		return nil, fmt.Errorf("unexpected state")
+	}
+}
+
+func (q *Q) Watch(ctx context.Context, tid string) (*types.Task, error) {
+	return q.store.GetTaskFromHeap(ctx, tid)
+}
+
+func (q *Q) Find(ctx context.Context, pattern string) (map[TaskState][]*types.Task, error) {
+	res := make(map[TaskState][]*types.Task)
+	tasks, err := q.store.FindInHeap(ctx, q.id, pattern)
+	if err != nil {
+		return nil, errors.Wrap(err, "find in heap")
+	}
+
+	for _, task := range tasks {
+		isBuried, err := q.store.IsTaskBuried(ctx, q.id, task.Id)
+		if err != nil {
+			return nil, errors.Wrap(err, "check if task is buried")
+		}
+		if isBuried {
+			if _, exists := res[StateBuried]; !exists {
+				res[StateBuried] = []*types.Task{}
+			}
+			res[StateBuried] = append(res[StateBuried], task)
+			continue
+		}
+
+		isDelayed, err := q.store.IsTaskDelayed(ctx, q.id, task.Id)
+		if err != nil {
+			return nil, errors.Wrap(err, "check if task is delayed")
+		}
+		if isDelayed {
+			if _, exists := res[StateDelayed]; !exists {
+				res[StateDelayed] = []*types.Task{}
+			}
+			res[StateDelayed] = append(res[StateDelayed], task)
+			continue
+		}
+
+		isReady, err := q.store.IsTaskReady(ctx, q.id, task.Id)
+		if err != nil {
+			return nil, errors.Wrap(err, "check if task is ready")
+		}
+		if isReady {
+			if _, exists := res[StateReady]; !exists {
+				res[StateReady] = []*types.Task{}
+			}
+			res[StateReady] = append(res[StateReady], task)
+			continue
+		}
+
+		isTaken, err := q.store.IsTaskTaken(ctx, q.id, task.Id)
+		if err != nil {
+			return nil, errors.Wrap(err, "check if task is taken")
+		}
+		if isTaken {
+			if _, exists := res[StateTaken]; !exists {
+				res[StateTaken] = []*types.Task{}
+			}
+			res[StateTaken] = append(res[StateTaken], task)
+			continue
+		}
+	}
+
+	return res, nil
 }

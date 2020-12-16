@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bsm/redislock"
@@ -25,16 +26,24 @@ type Storage interface {
 	GetValidationTimestamp(ctx context.Context, qid string) (ts string, err error)
 	SetValidationTimestamp(ctx context.Context, qid string) error
 	DropTaskFromHeap(ctx context.Context, tid string) error
+	FindInHeap(ctx context.Context, qid string, pattern string) ([]*types.Task, error)
 
 	// Task id
 	PutTaskIdToDelayedTree(ctx context.Context, qid, id string, delay time.Duration) error
 	PutTaskIdToReadyList(ctx context.Context, qid, tid string) error
 	PutTaskIdToBuriedSet(ctx context.Context, qid, tid string) error
+	IsTaskBuried(ctx context.Context, qid, tid string) (bool, error)
+	IsTaskDelayed(ctx context.Context, qid, tid string) (bool, error)
+	IsTaskReady(ctx context.Context, qid, tid string) (bool, error)
+	IsTaskTaken(ctx context.Context, qid, tid string) (bool, error)
 	GetRandomBuriedTaskId(ctx context.Context, qid string) (tid string, err error)
 	MoveTaskIdFromReadyListToTaken(ctx context.Context, qid string) (string, error)
 	DropTaskIdFromTakenList(ctx context.Context, qid, tid string) error
 	DropTaskIdFromDelayedTree(ctx context.Context, qid, tid string) error
 	GetTakenSlice(ctx context.Context, qid string, size int64) ([]string, error)
+	GetDelayedSlice(ctx context.Context, qid string, size int64) ([]string, error)
+	GetReadySlice(ctx context.Context, qid string, size int64) ([]string, error)
+	GetBuriedSlice(ctx context.Context, qid string, size int64) ([]string, error)
 	DropTaskIdFromBuriedSet(ctx context.Context, qid, tid string) error
 	GetDelayedHead(ctx context.Context, qid string) (tid string, delayScore float64, err error)
 
@@ -184,6 +193,49 @@ func (r *StorageImpl) DropTaskFromHeap(ctx context.Context, tid string) error {
 	return nil
 }
 
+// Find all task ids that contain pattern
+func (r *StorageImpl) FindInHeap(ctx context.Context, qid string, pattern string) ([]*types.Task, error) {
+	var res []*types.Task
+	uniq := make(map[string]bool)
+	if err := retry(ctx, func() error {
+		var cursor uint64 = 0
+		for {
+			var err error
+			var keys []string
+			keys, cursor, err = r.client.Scan(cursor, "", 10).Result()
+			if err != nil {
+				return newTempError(err)
+			}
+			if cursor == 0 {
+				return nil
+			}
+			for _, k := range keys {
+				taskStr, err := r.client.Get(k).Result()
+				if err != nil {
+					continue
+				}
+				task := &types.Task{}
+				if err := json.Unmarshal([]byte(taskStr), task); err != nil {
+					continue
+				}
+				body := make(map[string]interface{})
+				json.Unmarshal([]byte(task.Body), &body)
+				bodyBytes, _ := json.Marshal(body)
+				if strings.Contains(string(bodyBytes), pattern) {
+					if _, exists := uniq[k]; !exists {
+						res = append(res, task)
+						uniq[k] = true
+					}
+				}
+			}
+		}
+	}, defaultRetryLimit); err != nil {
+		return nil, errors.Wrap(err, "SCAN heap")
+	}
+
+	return res, nil
+}
+
 // Put task id to ZSET with score equal to delay
 func (r *StorageImpl) PutTaskIdToDelayedTree(ctx context.Context, qid, tid string, delay time.Duration) error {
 	if err := retry(ctx, func() error {
@@ -227,6 +279,98 @@ func (r *StorageImpl) PutTaskIdToBuriedSet(ctx context.Context, qid, tid string)
 	}
 
 	return nil
+}
+
+// Check if buried set contains task id
+func (r *StorageImpl) IsTaskBuried(ctx context.Context, qid, tid string) (bool, error) {
+	var res bool
+	if err := retry(ctx, func() error {
+		var err error
+		res, err = r.client.SIsMember(keySetBuried(qid), tid).Result()
+		if err != nil {
+			return newTempError(err)
+		}
+		return nil
+	}, defaultRetryLimit); err != nil {
+		return false, errors.Wrap(err, "SISMEMBER")
+	}
+
+	return res, nil
+}
+
+// Check if delayed tree contains task id
+func (r *StorageImpl) IsTaskDelayed(ctx context.Context, qid, tid string) (bool, error) {
+	var res bool
+	if err := retry(ctx, func() error {
+		var err error
+		var cursor uint64 = 0
+		for {
+			var found []string
+			found, cursor, err = r.client.ZScan(keyTreeDelayed(qid), cursor, tid, 50).Result()
+			if err != nil {
+				return newTempError(err)
+			}
+			if len(found) > 0 {
+				res = true
+				return nil
+			}
+			if cursor == 0 {
+				break
+			}
+		}
+		return nil
+	}, defaultRetryLimit); err != nil {
+		return false, errors.Wrap(err, "ZSCAN")
+	}
+
+	return res, nil
+}
+
+// Check if ready list contains task id. No guarantees for the result if list is being changed
+func (r *StorageImpl) IsTaskReady(ctx context.Context, qid, tid string) (bool, error) {
+	size, err := r.GetReadyListLen(ctx, qid)
+	if err != nil {
+		return false, errors.Wrap(err, "get ready list length")
+	}
+
+	return r.isTaskInList(ctx, keyListReady(qid), tid, size)
+}
+
+// Check if taken list contains task id. No guarantees for the result if list is being changed
+func (r *StorageImpl) IsTaskTaken(ctx context.Context, qid, tid string) (bool, error) {
+	size, err := r.GetTakenListLen(ctx, qid)
+	if err != nil {
+		return false, errors.Wrap(err, "get taken list length")
+	}
+
+	return r.isTaskInList(ctx, keyListTaken(qid), tid, size)
+}
+
+func (r *StorageImpl) isTaskInList(ctx context.Context, listKey, tid string, listSize int64) (bool, error) {
+	var res bool
+	if err := retry(ctx, func() error {
+		const batchSize = 64
+		for {
+			tids, err := r.client.LRange(listKey, listSize-batchSize, listSize).Result()
+			if err != nil {
+				return newTempError(err)
+			}
+			if len(tids) == 0 {
+				return nil
+			}
+			for _, t := range tids {
+				if t == tid {
+					res = true
+					return nil
+				}
+			}
+			listSize -= batchSize
+		}
+	}, defaultRetryLimit); err != nil {
+		return false, errors.Wrap(err, "LRANGE")
+	}
+
+	return res, nil
 }
 
 // Get random task id from buried set
@@ -335,16 +479,43 @@ func (r *StorageImpl) GetDelayedHead(ctx context.Context, qid string) (tid strin
 
 // Get slice of task ids from the beginning of taken list
 func (r *StorageImpl) GetTakenSlice(ctx context.Context, qid string, size int64) ([]string, error) {
+	return r.getListSlice(ctx, keyListReady(qid), size)
+}
+
+// Get slice of top task ids from delayed tree
+func (r *StorageImpl) GetDelayedSlice(ctx context.Context, qid string, size int64) ([]string, error) {
 	var res []string
 	if err := retry(ctx, func() error {
 		var err error
-		res, err = r.client.LRange(keyListTaken(qid), 0, 1024).Result()
+		res, err = r.client.ZRange(keyTreeDelayed(qid), 0, size).Result()
 		if err != nil {
 			return newTempError(err)
 		}
 		return nil
 	}, defaultRetryLimit); err != nil {
-		return nil, errors.Wrap(err, "LRANGE")
+		return nil, errors.Wrap(err, "ZRANGE")
+	}
+
+	return res, nil
+}
+
+// Get slice of task ids from beginning of ready slice
+func (r *StorageImpl) GetReadySlice(ctx context.Context, qid string, size int64) ([]string, error) {
+	return r.getListSlice(ctx, keyListReady(qid), size)
+}
+
+// Get slice of random elements from buried set
+func (r *StorageImpl) GetBuriedSlice(ctx context.Context, qid string, size int64) ([]string, error) {
+	var res []string
+	if err := retry(ctx, func() error {
+		var err error
+		res, err = r.client.SRandMemberN(keySetBuried(qid), size).Result()
+		if err != nil {
+			return newTempError(err)
+		}
+		return nil
+	}, defaultRetryLimit); err != nil {
+		return nil, errors.Wrap(err, "SRANDMEMBER")
 	}
 
 	return res, nil
@@ -366,34 +537,12 @@ func (r *StorageImpl) IncrementDoneCounter(ctx context.Context, qid string) erro
 
 // Get size of ready list using LLEN
 func (r *StorageImpl) GetReadyListLen(ctx context.Context, qid string) (int64, error) {
-	var res int64
-	if err := retry(ctx, func() error {
-		var err error
-		if res, err = r.client.LLen(keyListReady(qid)).Result(); err != nil {
-			return newTempError(err)
-		}
-		return nil
-	}, defaultRetryLimit); err != nil {
-		return -1, errors.Wrap(err, "LLEN")
-	}
-
-	return res, nil
+	return r.getListLen(ctx, keyListReady(qid))
 }
 
 // Get size of taken list using LLEN
 func (r *StorageImpl) GetTakenListLen(ctx context.Context, qid string) (int64, error) {
-	var res int64
-	if err := retry(ctx, func() error {
-		var err error
-		if res, err = r.client.LLen(keyListTaken(qid)).Result(); err != nil {
-			return newTempError(err)
-		}
-		return nil
-	}, defaultRetryLimit); err != nil {
-		return -1, errors.Wrap(err, "LLEN")
-	}
-
-	return res, nil
+	return r.getListLen(ctx, keyListTaken(qid))
 }
 
 // Get size of delayed tree using ZCOUNT
@@ -493,4 +642,35 @@ func (r *StorageImpl) tryLock(ctx context.Context, key string, period time.Durat
 	}
 
 	return releaseFunc, nil
+}
+
+func (r *StorageImpl) getListSlice(ctx context.Context, listKey string, size int64) ([]string, error) {
+	var res []string
+	if err := retry(ctx, func() error {
+		var err error
+		res, err = r.client.LRange(listKey, 0, size).Result()
+		if err != nil {
+			return newTempError(err)
+		}
+		return nil
+	}, defaultRetryLimit); err != nil {
+		return nil, errors.Wrap(err, "LRANGE")
+	}
+
+	return res, nil
+}
+
+func (r *StorageImpl) getListLen(ctx context.Context, key string) (int64, error) {
+	var res int64
+	if err := retry(ctx, func() error {
+		var err error
+		if res, err = r.client.LLen(key).Result(); err != nil {
+			return newTempError(err)
+		}
+		return nil
+	}, defaultRetryLimit); err != nil {
+		return -1, errors.Wrap(err, "LLEN")
+	}
+
+	return res, nil
 }

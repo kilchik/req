@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kilchik/req/pkg/fabriq"
 	"github.com/kilchik/req/pkg/req"
+	"github.com/kilchik/req/pkg/types"
 )
 
 func main() {
@@ -146,6 +148,40 @@ func main() {
 				printError("delete: %v", err)
 			}
 
+		case "delete-buried":
+			if len(tokens) < 2 {
+				printError("expected one or more uuids")
+				continue
+			}
+			if tokens[1] == "*" {
+				for {
+					top, err := q.Top(ctx, req.StateBuried, 100)
+					if err != nil {
+						printError("get top 200 buried: %v", err)
+						break
+					}
+					if len(top) == 0 {
+						break
+					}
+					for _, t := range top {
+						if err := q.DeleteBuried(ctx, t); err != nil {
+							printError("delete buried task %q: %v", t, err)
+						}
+					}
+					printSuccess("deleted %d buried tasks", len(top))
+				}
+			} else {
+				for _, t := range tokens[1:] {
+					if _, err := uuid.Parse(t); err != nil {
+						printError("invalid uuid %q", t)
+						continue
+					}
+					if err := q.DeleteBuried(ctx, t); err != nil {
+						printError("delete buried task %q: %v", t, err)
+					}
+				}
+			}
+
 		case "delay":
 			if len(tokens) != 2 {
 				printError("invalid args")
@@ -205,7 +241,87 @@ func main() {
 			if err := q.KickAll(ctx); err != nil {
 				printError("kick all: %v", err)
 			}
+
+		case "top":
+			validStates := map[string]req.TaskState{
+				"delayed": req.StateDelayed,
+				"ready":   req.StateReady,
+				"taken":   req.StateTaken,
+				"buried":  req.StateBuried,
+			}
+			invalidStateMsg := "expected state delayed/ready/taken/buried"
+			if len(tokens) < 2 {
+				printError(invalidStateMsg)
+				continue
+			}
+			state, present := validStates[tokens[1]]
+			if !present {
+				printError(invalidStateMsg)
+				continue
+			}
+			var size int64 = 5
+			if len(tokens) > 2 {
+				size, err = strconv.ParseInt(tokens[2], 10, 64)
+				if err != nil {
+					printError("invalid size")
+					continue
+				}
+			}
+			tids, err := q.Top(ctx, state, size)
+			if err != nil {
+				printError("get top from queue: %v", err)
+				continue
+			}
+			printSuccess(strings.Join(tids, " "))
+
+		case "watch":
+			if len(tokens) != 2 {
+				printError("invalid args")
+				continue
+			}
+			if _, err := uuid.Parse(tokens[1]); err != nil {
+				printError("invalid uuid")
+				continue
+			}
+			task, err := q.Watch(ctx, tokens[1])
+			if err != nil {
+				printError("watch: %v", err)
+				continue
+			}
+			printSuccess(formatTask(task))
+
+		case "find":
+			if len(tokens) != 2 {
+				printError("invalid args")
+				continue
+			}
+			tokens = strings.Split(tokens[1], "=")
+			if len(tokens) != 2 {
+				printError("invalid expression")
+				continue
+			}
+			pattern := strings.Join(tokens, `":`)
+			tasks, err := q.Find(ctx, pattern)
+			if err != nil {
+				printError("find: %v", err)
+				continue
+			}
+			stateNames := map[req.TaskState]string{
+				req.StateDelayed: "DELAYED",
+				req.StateReady:   "READY",
+				req.StateTaken:   "TAKEN",
+				req.StateBuried:  "BURIED",
+			}
+			for _, state := range []req.TaskState{req.StateBuried, req.StateDelayed, req.StateReady, req.StateTaken} {
+				if _, exists := tasks[state]; exists {
+					printSuccess(stateNames[state])
+				}
+				for _, t := range tasks[state] {
+					printSuccess(formatTask(t))
+				}
+			}
 		}
+
 		fmt.Println()
 	}
 }
@@ -213,4 +329,26 @@ func main() {
 func formatStat(s *req.Stat) string {
 	return fmt.Sprintf("%-10s%7d\n%-10s%7d\n%-10s%7d\n%-10s%7d\n%-10s%7d",
 		"done", s.Done, "ready", s.Ready, "taken", s.Taken, "delayed", s.Delayed, "buried", s.Buried)
+}
+
+type Task struct {
+	Id      string
+	Delay   time.Duration
+	Body    map[string]interface{}
+	TakenAt time.Time
+}
+
+func formatTask(t *types.Task) string {
+	body := make(map[string]interface{})
+	json.Unmarshal(t.Body, &body)
+	res := &Task{
+		Id:      t.Id,
+		Delay:   t.Delay,
+		Body:    body,
+		TakenAt: t.TakenAt,
+	}
+
+	taskBytes, _ := json.MarshalIndent(res, "", "\t")
+
+	return string(taskBytes)
 }
